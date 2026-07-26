@@ -1,0 +1,42 @@
+services:
+  db:
+    # pgvector image ships PostgreSQL 16 + the vector extension preinstalled
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: bidsa
+      POSTGRES_PASSWORD: bidsa
+      POSTGRES_DB: bidsa
+      # Ensure UTF8 (required by norm_status/normalize())
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bidsa -d bidsa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bidsa:bidsa@db:5432/bidsa
+      DATABASE_URL_SYNC: postgresql+psycopg2://bidsa:bidsa@db:5432/bidsa
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    # schema.sql lives at repo root; mount it so the migration can read it
+    volumes:
+      - ./db:/app/db:ro
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  pgdata:
