@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>كشاف — مرآة بيانات المنافسات</title>
+  <meta name="description" content="مرآة موثقة تدمج خط الأساس مع الجلب الدوري من منصة اعتماد الرسمية، وتعرض المنافسات والترسيات ومصادر كل سجل." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23111615'/%3E%3Cpath d='M17 18h30v7H35v22h-7V25H17z' fill='%23d7ae62'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Markazi+Text:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css?v=11" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="app-bar">
+    <a class="nav-brand" href="#home" data-nav="home">كشاف</a>
+    <nav class="nav-links nav-links-desktop" aria-label="القائمة الرئيسية">
+      <a href="#home" data-nav="home">الرئيسية</a>
+      <a href="#inventory" data-nav="inventory">المخزون</a>
+      <a href="#explorer" data-nav="explorer">المستكشف</a>
+      <a href="#missing" data-nav="missing">الناقص</a>
+    </nav>
+  </header>
+
+  <!-- الصفحة الرئيسية فقط -->
+  <section class="view view-home hero" id="view-home" data-view="home">
+    <div class="hero-stage">
+      <p class="brand">كشاف</p>
+      <h1>مرآة موثقة للمنافسات والترسيات</h1>
+      <p class="lede">خط الأساس محفوظ، والجلب الرسمي الدوري يحدّث الحقول الأحدث دون محو تاريخ العروض والترسيات. تظهر مصادر السجل وحداثته داخل التفاصيل.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="#explorer" data-nav="explorer">افتح المستكشف</a>
+        <a class="btn ghost" href="#inventory" data-nav="inventory">عرض المخزون</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- صفحة المخزون -->
+  <section class="view section stats" id="view-inventory" data-view="inventory" hidden>
+    <div class="page-head">
+      <h1>مخزون الجلب</h1>
+      <p>أرقام من طبقات المستودع كما حُفظت — لا اختصار للعرض.</p>
+    </div>
+    <div class="stat-strip" id="statStrip"></div>
+    <p class="fineprint" id="metaLine"></p>
+    <div class="section-head" style="margin-top:2rem">
+      <h2>كتالوج المجموعات</h2>
+      <p>اختر مجموعة للانتقال إلى المستكشف.</p>
+    </div>
+    <div class="catalog" id="catalog"></div>
+  </section>
+
+  <!-- صفحة الناقص -->
+  <section class="view section muted" id="view-missing" data-view="missing" hidden>
+    <div class="page-head">
+      <h1>ما لم يُجلب بعد</h1>
+      <p>يظهر هنا فقط ما فُقد فعلاً من الجلب — لا نخفي نقصاً.</p>
+    </div>
+    <ul class="missing-list" id="missingList"></ul>
+    <div class="cta-row" style="margin-top:1.5rem">
+      <a class="btn ghost" href="#inventory" data-nav="inventory">العودة للمخزون</a>
+      <a class="btn primary" href="#explorer" data-nav="explorer">المستكشف</a>
+    </div>
+  </section>
+
+  <!-- صفحة المستكشف فقط -->
+  <section class="view section" id="view-explorer" data-view="explorer" hidden>
+    <div class="page-head">
+      <h1>مستكشف المستودع</h1>
+      <p>اختر أي مجموعة مجلوبة. للمنافسات: التفاصيل محلية أولاً.</p>
+    </div>
+
+    <div class="group-tabs" id="groupTabs" role="tablist"></div>
+    <div class="dataset-tabs" id="datasetTabs"></div>
+
+    <div class="toolbar" id="toolbar">
+      <input type="search" id="search" class="q" aria-label="البحث في المنافسات والبيانات" placeholder="بحث في الاسم، الجهة، المنطقة…" />
+      <select id="filterRegion" aria-label="المنطقة"><option value="">كل المناطق</option></select>
+      <select id="filterActivity" aria-label="النشاط"><option value="">كل الأنشطة</option></select>
+      <select id="filterType" aria-label="النوع"><option value="">كل الأنواع</option></select>
+    </div>
+
+    <p class="explorer-error" id="explorerError" role="alert" aria-live="assertive" hidden></p>
+    <p class="fineprint" id="setMeta"></p>
+
+    <div class="table-wrap" id="tableWrap">
+      <table class="grid" id="grid">
+        <thead id="gridHead"></thead>
+        <tbody id="gridBody"></tbody>
+      </table>
+    </div>
+    <div class="card-list" id="cardList" aria-live="polite"></div>
+    <div class="pager" id="pager"></div>
+  </section>
+
+  <nav class="mobile-dock" aria-label="تنقل سريع">
+    <a href="#home" data-nav="home">الرئيسية</a>
+    <a href="#inventory" data-nav="inventory">المخزون</a>
+    <a href="#explorer" data-nav="explorer" class="dock-main">المستكشف</a>
+    <a href="#missing" data-nav="missing">الناقص</a>
+  </nav>
+
+  <footer class="footer" id="siteFooter">
+    <p><strong>كشاف</strong> — مرآة استكشافية غير رسمية تدمج خط الأساس مع الرصد الدوري. المصدر الرسمي للمشاركة: tenders.etimad.sa</p>
+  </footer>
+
+  <div id="detailRoot" class="detail" aria-hidden="true">
+    <button type="button" class="detail-backdrop" id="detailBackdrop" aria-label="إغلاق"></button>
+    <aside class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="detailTitle" tabindex="-1">
+      <header class="detail-head">
+        <div class="detail-head-top">
+          <span class="detail-brand">كشاف · تفاصيل محلية</span>
+          <button type="button" class="detail-close" id="detailClose" aria-label="إغلاق">✕</button>
+        </div>
+        <p class="detail-ref" id="detailRef"></p>
+        <div class="detail-titles">
+          <h2 id="detailTitle"></h2>
+          <p class="detail-title-ar" id="detailTitleAr" hidden></p>
+        </div>
+        <p class="detail-sub" id="detailSub"></p>
+      </header>
+      <div class="detail-actions">
+        <a class="btn primary" id="etimadLink" href="https://tenders.etimad.sa" target="_blank" rel="noopener">اعتماد الرسمية</a>
+        <button type="button" class="btn ghost" id="copyRef">نسخ المرجع</button>
+      </div>
+      <div id="detailBody" class="detail-body"></div>
+    </aside>
+  </div>
+
+  <script src="assets/app.js?v=13" defer></script>
+</body>
+</html>
