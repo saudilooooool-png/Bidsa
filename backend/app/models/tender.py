@@ -24,8 +24,11 @@ class Tender(Base):
 
     # Identity & taxonomy
     reference_number: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    tender_number: Mapped[str | None] = mapped_column(Text)   # agency-side number
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    details_url: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     agency_id: Mapped[int | None] = mapped_column(ForeignKey("agencies.id", ondelete="SET NULL"))
     activity_id: Mapped[int | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"))
     type_id: Mapped[int | None] = mapped_column(ForeignKey("tender_types.id", ondelete="SET NULL"))

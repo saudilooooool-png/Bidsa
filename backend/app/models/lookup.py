@@ -46,4 +46,6 @@ class Company(Base):
     cr_number: Mapped[str | None] = mapped_column(Text, unique=True)
     name_ar: Mapped[str] = mapped_column(Text, nullable=False)
     name_en: Mapped[str | None] = mapped_column(Text)
+    # normalized dedupe key (hamza/teh-marbuta variants collapse to one row)
+    name_key: Mapped[str | None] = mapped_column(Text, unique=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
