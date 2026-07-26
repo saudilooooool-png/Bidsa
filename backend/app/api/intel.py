@@ -35,6 +35,27 @@ def sar(halalas: int | float | None) -> float | None:
 _single_bid = func.avg(case((Tender.bids_count == 1, 1), else_=0).cast(Integer)) * 100
 
 
+@router.get("/lookups")
+async def lookups(session: AsyncSession = Depends(get_session)):
+    """Activities and regions with tender counts — powers frontend filter menus."""
+    acts = (await session.execute(
+        select(Activity.id, Activity.name_ar, func.count(Tender.id))
+        .join(Tender, Tender.activity_id == Activity.id)
+        .group_by(Activity.id, Activity.name_ar)
+        .order_by(func.count(Tender.id).desc())
+    )).all()
+    regions = (await session.execute(
+        select(Region.id, Region.name_ar, func.count(Tender.id))
+        .join(Tender, Tender.region_id == Region.id)
+        .group_by(Region.id, Region.name_ar)
+        .order_by(func.count(Tender.id).desc())
+    )).all()
+    return {
+        "activities": [{"id": r[0], "name": r[1], "tenders": r[2]} for r in acts],
+        "regions": [{"id": r[0], "name": r[1], "tenders": r[2]} for r in regions],
+    }
+
+
 @router.get("/overview", response_model=OverviewOut)
 async def overview(session: AsyncSession = Depends(get_session)):
     t = (await session.execute(select(
