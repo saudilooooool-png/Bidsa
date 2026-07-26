@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import tenders
+from app.api import intel, tenders
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.tasks.scheduler import start_scheduler, stop_scheduler
@@ -34,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(tenders.router)
+app.include_router(intel.router)
 
 
 @app.get("/health")
