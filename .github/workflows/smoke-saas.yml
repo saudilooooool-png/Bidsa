@@ -1,0 +1,60 @@
+name: SaaS production smoke test
+
+# Registers a disposable account against the production backend and exercises
+# the core SaaS loop (register -> me -> upload -> match). Proves the deployed
+# Render instance + Neon migration are serving the new endpoints.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/etimad-plus-viewer-clone-un577o, main]
+    paths: [".github/workflows/smoke-saas.yml"]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API: https://bidsa-api.onrender.com
+    steps:
+      - name: Wait for new backend code (auth route present)
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 \
+              -X POST "$API/api/v1/auth/login" \
+              -H 'Content-Type: application/json' -d '{"email":"x@x.sa","password":"xxxxxxxx"}')
+            # 401 = route exists (bad creds); 404 = old deploy still live
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "401" ] || [ "$code" = "422" ]; then exit 0; fi
+            sleep 25
+          done
+          echo "::error::auth routes never appeared — Render deploy failed or still building"
+          exit 1
+
+      - name: Register disposable account and run the SaaS loop
+        run: |
+          EMAIL="smoke-${{ github.run_id }}@bidsa-ci.test"
+          reg=$(curl -sS --max-time 90 -X POST "$API/api/v1/auth/register" \
+            -H 'Content-Type: application/json' \
+            -d "{\"company_name\":\"شركة الفحص الآلي\",\"full_name\":\"فحص دخاني\",\"email\":\"$EMAIL\",\"password\":\"smoketest123\"}")
+          echo "register: $reg"
+          TOKEN=$(printf '%s' "$reg" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          [ -n "$TOKEN" ]
+
+          me=$(curl -sS --max-time 60 "$API/api/v1/auth/me" -H "Authorization: Bearer $TOKEN")
+          echo "me: $me"
+          printf '%s' "$me" | grep -q '"state": *"trial"' || printf '%s' "$me" | grep -q '"state":"trial"'
+
+          printf 'ملف الشركة: صيانة وتشغيل المنشآت والمباني الحكومية والنظافة العامة.' > profile.txt
+          up=$(curl -sS --max-time 90 -X POST "$API/api/v1/knowledge/upload" \
+            -H "Authorization: Bearer $TOKEN" -F "file=@profile.txt")
+          echo "upload: $up"
+          printf '%s' "$up" | grep -q '"chunks"'
+
+          match=$(curl -sS --max-time 90 -X POST "$API/api/v1/knowledge/match" \
+            -H "Authorization: Bearer $TOKEN")
+          n=$(printf '%s' "$match" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["matches"]))')
+          echo "matches returned: $n"
+          [ "$n" -gt 0 ]
+
+          echo "### ✅ SaaS smoke passed — register/me/upload/match live on production ($n matches)" >> "$GITHUB_STEP_SUMMARY"
