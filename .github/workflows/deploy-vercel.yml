@@ -5,9 +5,17 @@ name: Deploy frontend to Vercel
 # Required repository secret:
 #   VERCEL_TOKEN   (create at vercel.com -> Settings -> Tokens)
 #
-# Optional workflow input:
-#   api_url — the public FastAPI base URL. Leave empty to ship DEMO MODE
-#   (the site serves the bundled historical snapshot with no backend).
+# Selecting demo vs live mode — the backend URL is read from, in order:
+#   1. the api_url workflow_dispatch input (one-off override), then
+#   2. the API_URL repository *variable*
+#      (Settings -> Secrets and variables -> Actions -> Variables tab).
+# The variable exists so live mode can be enabled on a plain push, without
+# needing permission to dispatch workflows. Empty => DEMO MODE: the site
+# serves the bundled historical snapshot with no backend.
+#
+# Setting API_URL is non-destructive by design: when it resolves empty this
+# workflow leaves whatever env the Vercel project already has, so a value set
+# by hand in the Vercel dashboard is never silently wiped by a frontend push.
 
 on:
   workflow_dispatch:
@@ -35,6 +43,9 @@ jobs:
     timeout-minutes: 20
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # Read via env, never interpolated into a shell command, so an
+      # attacker-controlled value cannot inject shell syntax.
+      RESOLVED_API_URL: ${{ inputs.api_url || vars.API_URL }}
     steps:
       - name: Require VERCEL_TOKEN secret
         run: |
@@ -42,6 +53,25 @@ jobs:
             echo "::error::VERCEL_TOKEN repository secret is not set (Settings -> Secrets and variables -> Actions)"
             exit 1
           fi
+
+      - name: Verify backend is reachable (live mode only)
+        if: env.RESOLVED_API_URL != ''
+        run: |
+          echo "Probing $RESOLVED_API_URL/health ..."
+          # A free-tier backend may be asleep; allow generous time to wake.
+          for attempt in 1 2 3; do
+            body=$(curl -sS --max-time 90 "$RESOLVED_API_URL/health" || true)
+            case "$body" in
+              *'"ok"'*)
+                echo "backend healthy: $body"
+                exit 0
+                ;;
+            esac
+            echo "attempt $attempt did not return a healthy response (got: ${body:-<empty>})"
+            sleep 10
+          done
+          echo "::error::$RESOLVED_API_URL/health never returned {\"status\":\"ok\"}. Refusing to switch the site to live mode against an unreachable backend."
+          exit 1
 
       - uses: actions/checkout@v4
 
@@ -60,11 +90,18 @@ jobs:
                 && vercel link --yes --project bidsa --token "$VERCEL_TOKEN")
 
       - name: Configure API_URL (live mode only)
-        if: ${{ inputs.api_url != '' }}
+        if: env.RESOLVED_API_URL != ''
         working-directory: frontend
         run: |
           vercel env rm API_URL production --yes --token "$VERCEL_TOKEN" || true
-          printf '%s' "${{ inputs.api_url }}" | vercel env add API_URL production --token "$VERCEL_TOKEN"
+          printf '%s' "$RESOLVED_API_URL" | vercel env add API_URL production --token "$VERCEL_TOKEN"
+          echo "mode: LIVE -> $RESOLVED_API_URL"
+
+      - name: Report demo mode
+        if: env.RESOLVED_API_URL == ''
+        run: |
+          echo "mode: DEMO (no api_url input and no API_URL repository variable)."
+          echo "Any API_URL already stored in the Vercel project is left untouched."
 
       - name: Deploy (production)
         working-directory: frontend
