@@ -1,0 +1,37 @@
+# Render Blueprint — deploys the Bidsa FastAPI backend.
+#
+# Use it: Render dashboard -> New -> Blueprint -> pick this repo.
+# Render reads this file and pre-fills the service; you only paste the two
+# database URLs (marked sync:false, so they are never stored in git).
+#
+# The frontend is NOT here on purpose — it lives on Vercel
+# (https://bidsa.vercel.app), deployed by .github/workflows/deploy-vercel.yml.
+services:
+  - type: web
+    name: bidsa-api
+    runtime: docker
+    # Frankfurt matches the Neon project's region (eu-central-1), keeping
+    # query latency to a few milliseconds instead of crossing the Atlantic.
+    region: frankfurt
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # sync:false => Render prompts for the value and keeps it out of git.
+      # Paste the Neon URL verbatim into BOTH; app/core/config.py binds the
+      # right driver and fixes the SSL params per driver.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SYNC
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      # Start with the historical warehouse only. Flip to true to enable the
+      # periodic Etimad fetch — note the free plan sleeps when idle, which
+      # pauses the scheduler too.
+      - key: ENABLE_SCHEDULER
+        value: "false"

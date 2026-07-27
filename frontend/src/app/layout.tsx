@@ -7,6 +7,12 @@ import "./globals.css";
 // freeze demo-mode HTML into the bundle and ignore the runtime env).
 export const dynamic = "force-dynamic";
 
+// Live mode renders on the server, so a sleeping free-tier backend (Render
+// sleeps after ~15 min idle; waking takes up to ~50s) is billed against this
+// function's budget. Raise the ceiling so the first request after a sleep
+// waits for the wake-up instead of timing out into the error boundary.
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "بيدسا — استخبارات المشتريات الحكومية",
   description:
