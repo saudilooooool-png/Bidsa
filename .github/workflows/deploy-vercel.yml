@@ -77,6 +77,23 @@ jobs:
           echo "::error::$RESOLVED_API_URL/health never returned {\"status\":\"ok\"}. Refusing to switch the site to live mode against an unreachable backend."
           exit 1
 
+      - name: Verify backend serves real data (live mode only)
+        if: env.RESOLVED_API_URL != ''
+        run: |
+          # /health is a static liveness probe and passes even when the
+          # database is unreachable, so assert on a query-backed endpoint:
+          # a wrong DATABASE_URL would otherwise ship a site that 500s on
+          # every page while the health gate reported success.
+          body=$(curl -sS --max-time 90 "$RESOLVED_API_URL/api/v1/intel/overview" || true)
+          echo "overview: $body"
+          tenders=$(printf '%s' "$body" | grep -o '"tenders":[0-9]\+' | head -1 | cut -d: -f2)
+          if [ "${tenders:-0}" -gt 0 ] 2>/dev/null; then
+            echo "backend is serving $tenders tenders from the warehouse"
+          else
+            echo "::error::$RESOLVED_API_URL/api/v1/intel/overview returned no tenders. The backend is up but cannot read the database — check DATABASE_URL / DATABASE_URL_SYNC in the Render service."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
