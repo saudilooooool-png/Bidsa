@@ -28,7 +28,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
+      - name: Require VERCEL_TOKEN secret
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::VERCEL_TOKEN repository secret is not set (Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -44,8 +53,6 @@ jobs:
           vercel link --yes --project bidsa --token "$VERCEL_TOKEN" \
             || (vercel projects add bidsa --token "$VERCEL_TOKEN" \
                 && vercel link --yes --project bidsa --token "$VERCEL_TOKEN")
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
       - name: Configure API_URL (live mode only)
         if: ${{ inputs.api_url != '' }}
@@ -53,8 +60,6 @@ jobs:
         run: |
           vercel env rm API_URL production --yes --token "$VERCEL_TOKEN" || true
           printf '%s' "${{ inputs.api_url }}" | vercel env add API_URL production --token "$VERCEL_TOKEN"
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy (production)
         working-directory: frontend
@@ -64,5 +69,3 @@ jobs:
           echo "### ✅ Deployed" >> "$GITHUB_STEP_SUMMARY"
           echo "$URL" >> "$GITHUB_STEP_SUMMARY"
         id: deploy
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
