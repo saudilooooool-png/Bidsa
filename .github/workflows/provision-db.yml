@@ -35,7 +35,7 @@ jobs:
       - name: Apply migrations (schema.sql + follow-ups)
         working-directory: backend
         env:
-          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+          DATABASE_URL_SYNC: ${{ postgresql://neondb_owner:npg_6E3JQDVwUYrx@ep-long-term-asiei4x8-pooler.c-4.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require }}
         run: alembic upgrade head
 
       - name: Load historical warehouse (idempotent)
