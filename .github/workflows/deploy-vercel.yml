@@ -6,12 +6,13 @@ name: Deploy frontend to Vercel
 #   VERCEL_TOKEN   (create at vercel.com -> Settings -> Tokens)
 #
 # Selecting demo vs live mode — the backend URL is read from, in order:
-#   1. the api_url workflow_dispatch input (one-off override), then
+#   1. the api_url workflow_dispatch input (one-off override),
 #   2. the API_URL repository *variable*
-#      (Settings -> Secrets and variables -> Actions -> Variables tab).
-# The variable exists so live mode can be enabled on a plain push, without
-# needing permission to dispatch workflows. Empty => DEMO MODE: the site
-# serves the bundled historical snapshot with no backend.
+#      (Settings -> Secrets and variables -> Actions -> Variables tab),
+#   3. the committed default below (the deployed Render backend).
+# The variable exists so the backend can be repointed on a plain push, without
+# needing permission to dispatch workflows. If every source is empty the site
+# ships DEMO MODE: the bundled historical snapshot, no backend required.
 #
 # Setting API_URL is non-destructive by design: when it resolves empty this
 # workflow leaves whatever env the Vercel project already has, so a value set
@@ -45,7 +46,10 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       # Read via env, never interpolated into a shell command, so an
       # attacker-controlled value cannot inject shell syntax.
-      RESOLVED_API_URL: ${{ inputs.api_url || vars.API_URL }}
+      # Falls back to the deployed Render backend. This is a public URL, not a
+      # credential, so committing it is safe; set the API_URL repository
+      # variable to point the site at a different backend.
+      RESOLVED_API_URL: ${{ inputs.api_url || vars.API_URL || 'https://bidsa-api.onrender.com' }}
     steps:
       - name: Require VERCEL_TOKEN secret
         run: |

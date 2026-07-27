@@ -94,17 +94,16 @@ Root Directory = `backend`، ثم نفس المتغيرات. (الباقة ال�
 **أو عبر GitHub Actions (المستخدَم حاليًا):** الموقع منشور على
 <https://bidsa.vercel.app> بالوضع التجريبي.
 
-### التحويل إلى الوضع الحي
+### الوضع الحي
 
-أضف **متغيّرًا** (Variable وليس Secret) في
-Settings → Secrets and variables → Actions → تبويب **Variables**:
+الخادم منشور على <https://bidsa-api.onrender.com> وهذا الرابط مثبّت كقيمة
+افتراضية في الـworkflow (رابط عام، ليس سرًّا)، فكل نشر يضبط `API_URL` في
+مشروع Vercel تلقائيًا.
 
-| الاسم | القيمة |
-|---|---|
-| `API_URL` | `https://<اسم-الخدمة>.onrender.com` (بلا `/` في النهاية) |
-
-ثم شغّل workflow **Deploy frontend to Vercel** — أو انتظر أي push إلى
-`frontend/`. الـworkflow يقرأ المتغيّر ويضبط `API_URL` في مشروع Vercel.
+لتوجيه الموقع إلى خادم آخر، أضف **متغيّرًا** (Variable وليس Secret) في
+Settings → Secrets and variables → Actions → تبويب **Variables** باسم
+`API_URL` وقيمة الرابط الجديد (بلا `/` في النهاية) — فهو يتقدّم على
+الافتراضي.
 
 قبل التبديل يفحص الـworkflow نقطة `/health` على الخادم (بثلاث محاولات ومهلة
 واسعة تسمح بإيقاظ الخدمة النائمة على الباقة المجانية)، ويرفض النشر إن لم
