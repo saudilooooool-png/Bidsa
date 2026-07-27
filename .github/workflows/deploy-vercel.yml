@@ -24,6 +24,11 @@ on:
       - "frontend/**"
       - ".github/workflows/deploy-vercel.yml"
 
+# Newer deploys supersede in-flight ones instead of racing them.
+concurrency:
+  group: vercel-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
