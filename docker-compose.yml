@@ -31,9 +31,13 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
-    # schema.sql lives at repo root; mount it so the migration can read it
+    # schema.sql lives at repo root; mount it so the migration can read it.
+    # The historical shards are mounted read-only so the ETL can run in-container:
+    #   docker compose exec backend python scripts/etl_historical.py \
+    #     --data-dir /app/data-src --db "postgresql+psycopg2://bidsa:bidsa@db:5432/bidsa"
     volumes:
       - ./db:/app/db:ro
+      - ./etimad-plus-viewer/data:/app/data-src:ro
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
