@@ -1,0 +1,69 @@
+name: Probe Etimad official API
+
+# Diagnostic: calls the official Etimad JSON endpoint from a GitHub runner
+# (which has open egress) and reports the response shape, so FIELD_MAP in
+# backend/app/services/etimad_api.py can be validated against reality.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/etimad-plus-viewer-clone-un577o, main]
+    paths: [".github/workflows/probe-etimad.yml"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Call AllSupplierTendersForVisitorAsync
+        run: |
+          curl -sS --compressed --max-time 60 -o body.json -w "HTTP %{http_code} | %{content_type} | %{size_download} bytes\n" \
+            "https://tenders.etimad.sa/Tender/AllSupplierTendersForVisitorAsync?PageNumber=1&PageSize=5&PublishDateId=5&IsSearch=true&SortDirection=DESC&Sort=SubmitionDate" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "X-Requested-With: XMLHttpRequest" \
+            -H "Accept: application/json, text/javascript, */*; q=0.01" \
+            -H "Referer: https://tenders.etimad.sa/Tender/AllTendersForVisitor" || true
+          head -c 400 body.json; echo
+
+      - name: Analyze response shape vs FIELD_MAP
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          raw = open("body.json", "rb").read()
+          try:
+              data = json.loads(raw)
+          except Exception:
+              print("NOT JSON — first 800 bytes:")
+              print(raw[:800].decode("utf-8", "replace"))
+              sys.exit(0)
+          print("top-level type:", type(data).__name__)
+          if isinstance(data, dict):
+              print("top-level keys:", list(data.keys())[:15])
+              items = None
+              for k in ("data", "tenders", "items", "results", "aaData"):
+                  if isinstance(data.get(k), list):
+                      items = data[k]; print(f"list under key: {k} (len={len(items)})"); break
+          else:
+              items = data
+              print("list length:", len(items))
+          if items:
+              first = items[0]
+              print("\nitem keys:")
+              for k, v in first.items():
+                  print(f"  {k}: {repr(v)[:70]}")
+              CANDIDATES = {
+                  "reference_number": ("referenceNumber","tenderReferenceNumber","referenceNo"),
+                  "title": ("tenderName","tenderTitle","name"),
+                  "agency_name": ("agencyName","governmentAgency","agency"),
+                  "activity_name": ("tenderActivityName","activityName","mainActivityName"),
+                  "type_name": ("tenderTypeName","typeName"),
+                  "status": ("tenderStatusName","statusName","tenderStatus","tenderStatusId","statusId"),
+                  "deadline": ("lastOfferPresentationDate","offerPresentationDate","lastEnqueryDate"),
+                  "submission": ("submitionDate","submissionDate","publishDate"),
+                  "tender_id": ("tenderId","tenderIdString","id"),
+              }
+              print("\nFIELD_MAP validation:")
+              for field, keys in CANDIDATES.items():
+                  hit = next((k for k in keys if k in first), None)
+                  print(f"  {'OK ' if hit else 'MISS'} {field}: {hit or 'no candidate matched'}")
+          PY
