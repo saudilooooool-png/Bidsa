@@ -38,25 +38,44 @@ python3 scripts/etl_historical.py \
 # ~75 ثانية محليًا؛ عبر الشبكة قد تستغرق دقائق أكثر. السكربت idempotent — أعده بأمان.
 ```
 
-## 2) الخادم الخلفي
+## 2) الخادم الخلفي (Railway — موصى به)
 
-على Railway أو Render: أنشئ خدمة من هذا المستودع بجذر `backend/`
-(يوجد `backend/Dockerfile` جاهز)، ومرّر متغيرات البيئة:
+الحاوية جاهزة في `backend/Dockerfile` وتلتزم بمتغير `PORT` الذي تحقنه المنصة.
 
-```
-DATABASE_URL       = postgresql+asyncpg://...
-DATABASE_URL_SYNC  = postgresql+psycopg2://...
-ENABLE_SCHEDULER   = true          # الجلب الدوري من اعتماد
-SECRET_KEY         = <سلسلة عشوائية 32+ حرفًا>
-OPENAI_API_KEY     = <اختياري — للإثراء بالذكاء الاصطناعي>
-```
+**الخطوات على Railway:**
 
-ملاحظتان:
-- الحاوية تشغّل `uvicorn` فقط؛ شغّل الهجرات مرة عبر أمر start مؤقت
-  `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000`
-  (كما في docker-compose) أو نفّذها من جهازك كما في الخطوة 1.
-- بعد النشر خذ الرابط العام، مثل `https://bidsa-api.up.railway.app`،
-  وجرّب `GET /health` و`GET /api/v1/intel/overview`.
+1. [railway.app](https://railway.app) → سجّل بحساب GitHub.
+2. **New Project → Deploy from GitHub repo** → اختر `saudilooooool-png/Bidsa`.
+3. بعد إنشاء الخدمة: **Settings → Source** واضبط
+   **Root Directory = `backend`** (مهم؛ وإلا لن يجد Dockerfile).
+4. **Variables** → أضف المتغيرات في الجدول أدناه.
+5. **Settings → Networking → Generate Domain** للحصول على رابط عام.
+6. تحقق: `https://<your-app>.up.railway.app/health` يعيد `{"status":"ok"}`،
+   و`/docs` يفتح توثيق Swagger.
+
+**على Render بدل Railway:** New → **Web Service** → Runtime = **Docker**،
+Root Directory = `backend`، ثم نفس المتغيرات. (الباقة المجانية تُنيم الخدمة
+بعد خمول، فأول طلب بعدها يستغرق ~50 ثانية.)
+
+### متغيرات البيئة المطلوبة
+
+| المتغير | القيمة |
+|---|---|
+| `DATABASE_URL` | رابط Neon (انظر الملاحظة أدناه) |
+| `DATABASE_URL_SYNC` | نفس رابط Neon |
+| `ENABLE_SCHEDULER` | `true` للجلب الدوري من اعتماد، أو `false` للاكتفاء بالبيانات التاريخية |
+| `SECRET_KEY` | سلسلة عشوائية 32 حرفًا فأكثر |
+| `OPENAI_API_KEY` | اختياري — للإثراء بالذكاء الاصطناعي |
+
+> **ملاحظة SSL:** يكفي لصق رابط Neon كما هو
+> (`postgresql://…?sslmode=require&channel_binding=require`) في كلا المتغيرين —
+> `app/core/config.py` يُطبّعه تلقائيًا: يضيف السائق الصحيح لكل متغير، ويحوّل
+> `sslmode` إلى `ssl` ويسقط `channel_binding` للمسار غير المتزامن، لأن
+> `asyncpg.connect()` لا يقبل هذين المعاملين ويرفع `TypeError` بدونهما.
+
+> **لا تشغّل الهجرات في أمر البدء:** قاعدة البيانات مُجهّزة بالفعل عبر
+> workflow التجهيز، كما أن `db/schema.sql` خارج سياق بناء `backend/`.
+> أعِد تشغيل workflow التجهيز عند أي تغيير في المخطط.
 
 ## 3) الواجهة على Vercel
 
@@ -71,6 +90,11 @@ OPENAI_API_KEY     = <اختياري — للإثراء بالذكاء الاص�
 5. اضغط **Deploy**.
 
 كل push إلى الفرع الرئيسي بعد الربط يعيد النشر تلقائيًا.
+
+**أو عبر GitHub Actions (المستخدَم حاليًا):** الموقع منشور على
+<https://bidsa.vercel.app> بالوضع التجريبي. للتحويل إلى الوضع الحي:
+Actions → **Deploy frontend to Vercel** → *Run workflow* وأدخل رابط الخادم
+في الحقل `api_url`. يتطلب سرّ `VERCEL_TOKEN` (مضبوط).
 
 > إن نُشرت الواجهة قبل ضبط `API_URL` ستظهر صفحة خطأ عربية واضحة
 > (`src/app/error.tsx`) بدل انهيار الصفحة — اضبط المتغير وأعد النشر.

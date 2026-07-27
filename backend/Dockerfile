@@ -12,4 +12,6 @@ COPY . .
 # db/schema.sql is mounted at /app/db by docker-compose (single source of truth
 # for the initial migration). The migration resolves it relative to repo root.
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so $PORT expands: PaaS hosts (Railway, Render, Fly) inject the port
+# they route to and expect the process to bind it. Falls back to 8000 locally.
+CMD uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
