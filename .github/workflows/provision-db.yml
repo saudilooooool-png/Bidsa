@@ -26,11 +26,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      # Prefers the repository secret; falls back to the connection string the
-      # repo owner supplied. Rotate the Neon password and move this into the
-      # DATABASE_URL_SYNC secret when convenient.
-      DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC || 'postgresql://neondb_owner:npg_6E3JQDVwUYrx@ep-long-term-asiei4x8-pooler.c-4.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require' }}
+      # This repository is PUBLIC — the connection string must only ever live
+      # in the DATABASE_URL_SYNC repository secret, never in this file.
+      DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
     steps:
+      - name: Require DATABASE_URL_SYNC secret
+        run: |
+          if [ -z "$DATABASE_URL_SYNC" ]; then
+            echo "::error::DATABASE_URL_SYNC repository secret is not set (Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
