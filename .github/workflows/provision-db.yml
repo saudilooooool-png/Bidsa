@@ -12,6 +12,14 @@ name: Provision cloud database
 
 on:
   workflow_dispatch:
+  # Auto-provision when the schema, migrations, ETL, or this workflow change.
+  push:
+    branches: [claude/etimad-plus-viewer-clone-un577o, main]
+    paths:
+      - "db/schema.sql"
+      - "backend/alembic/**"
+      - "backend/scripts/etl_historical.py"
+      - ".github/workflows/provision-db.yml"
 
 jobs:
   provision:

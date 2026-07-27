@@ -16,6 +16,13 @@ on:
         description: "API_URL for live mode (empty = demo mode)"
         required: false
         default: ""
+  # Auto-deploy on frontend changes (push events deploy demo/live per the
+  # API_URL env already stored in the Vercel project).
+  push:
+    branches: [claude/etimad-plus-viewer-clone-un577o, main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-vercel.yml"
 
 jobs:
   deploy:
