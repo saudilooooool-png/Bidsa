@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import "./globals.css";
 
+// Demo vs live mode is decided by API_URL at REQUEST time, so pages must not
+// be statically baked at build time (a build without API_URL would otherwise
+// freeze demo-mode HTML into the bundle and ignore the runtime env).
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "بيدسا — استخبارات المشتريات الحكومية",
   description:

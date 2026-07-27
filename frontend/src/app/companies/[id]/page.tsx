@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { IS_DEMO, api } from "@/lib/api";
 import { num, pct, sarCompact } from "@/lib/format";
 import StatTile from "@/components/StatTile";
 import Panel from "@/components/Panel";
@@ -12,6 +12,21 @@ export default async function CompanyProfilePage({
 }) {
   const { id } = await params;
   const p = await api.companyProfile(Number(id));
+  if (!p) {
+    return (
+      <div className="rounded-lg border bg-surface p-8 text-center">
+        <h1 className="text-lg font-bold text-ink">الملف غير متاح</h1>
+        <p className="mt-2 text-sm text-ink-2">
+          {IS_DEMO
+            ? "النسخة التجريبية تتضمن ملفات أكبر 24 شركة فقط — اربط الخادم الخلفي لعرض كل الشركات."
+            : "لم يتم العثور على هذه الشركة."}
+        </p>
+        <Link href="/companies" className="mt-4 inline-block text-sm text-accent hover:underline">
+          ← عودة إلى البحث
+        </Link>
+      </div>
+    );
+  }
   const maxAgency = Math.max(...p.top_agencies.map((a) => a.total_award_sar ?? 0), 1);
 
   return (

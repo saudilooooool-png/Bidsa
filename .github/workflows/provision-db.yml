@@ -1,0 +1,65 @@
+name: Provision cloud database
+
+# Applies the schema (alembic) and loads the 55K-record historical warehouse
+# into the cloud PostgreSQL (e.g. Neon). Runs on GitHub's runners because the
+# database is unreachable from some development sandboxes.
+#
+# Required repository secret:
+#   DATABASE_URL_SYNC  e.g. postgresql+psycopg2://USER:PASS@HOST/DB?sslmode=require
+#
+# Trigger manually from the Actions tab (or via API) whenever the schema or
+# the historical shards change. The ETL is idempotent — safe to re-run.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies (slim)
+        run: |
+          pip install --quiet \
+            "sqlalchemy[asyncio]==2.0.36" psycopg2-binary==2.9.10 \
+            alembic==1.14.0 pgvector==0.3.6 \
+            pydantic==2.10.3 pydantic-settings==2.6.1 python-dotenv==1.0.1 \
+            structlog==24.4.0
+
+      - name: Apply migrations (schema.sql + follow-ups)
+        working-directory: backend
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: alembic upgrade head
+
+      - name: Load historical warehouse (idempotent)
+        working-directory: backend
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python scripts/etl_historical.py \
+            --data-dir ../etimad-plus-viewer/data \
+            --db "$DATABASE_URL_SYNC" \
+            --report-out ../db/reports/historical_coverage.md
+
+      - name: Verify row counts
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          e = create_engine(os.environ["DATABASE_URL_SYNC"])
+          with e.connect() as c:
+              for t in ("tenders", "awards", "award_winners", "tender_bids", "companies"):
+                  n = c.execute(text(f"SELECT count(*) FROM {t}")).scalar()
+                  print(f"{t}: {n:,}")
+              total = c.execute(text("SELECT sum(win_amount_halalas)/100/1e9 FROM awards")).scalar()
+              print(f"total awarded: {float(total):.1f}B SAR")
+          PY

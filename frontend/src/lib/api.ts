@@ -1,9 +1,26 @@
-/** Typed server-side client for the Bidsa intelligence API. */
+/** Typed server-side client for the Bidsa intelligence API.
+ *
+ * When API_URL is unset (e.g. a fresh Vercel import with no backend yet),
+ * the client transparently switches to DEMO MODE: the same contract served
+ * from a bundled snapshot of the historical warehouse (src/data/demo).
+ */
 
-const API_URL = process.env.API_URL ?? "http://localhost:8000";
+const API_URL = process.env.API_URL;
+
+/** True when serving from the bundled snapshot instead of a live backend. */
+export const IS_DEMO = !API_URL;
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`API ${res.status} on ${path}: ${await res.text()}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function getOrNull<T>(path: string): Promise<T | null> {
+  const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
+  if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(`API ${res.status} on ${path}: ${await res.text()}`);
   }
@@ -133,11 +150,12 @@ export interface Lookups {
 
 // ---- fetchers ---------------------------------------------------------------
 
-export const api = {
+const liveApi = {
   overview: () => get<Overview>("/api/v1/intel/overview"),
   agencies: (sort = "spend", limit = 30) =>
     get<AgencyRow[]>(`/api/v1/intel/agencies?sort=${sort}&limit=${limit}`),
-  agencyProfile: (id: number) => get<AgencyProfile>(`/api/v1/intel/agencies/${id}`),
+  agencyProfile: (id: number) =>
+    getOrNull<AgencyProfile>(`/api/v1/intel/agencies/${id}`),
   pricing: (params: URLSearchParams) =>
     get<PricingBenchmark>(`/api/v1/intel/pricing?${params.toString()}`),
   competition: (minTenders = 100, order = "least", limit = 30) =>
@@ -152,6 +170,19 @@ export const api = {
     get<CompanySearchRow[]>(
       `/api/v1/intel/companies?q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
-  companyProfile: (id: number) => get<CompanyProfile>(`/api/v1/intel/companies/${id}`),
+  companyProfile: (id: number) =>
+    getOrNull<CompanyProfile>(`/api/v1/intel/companies/${id}`),
   lookups: () => get<Lookups>("/api/v1/intel/lookups"),
 };
+
+// Lazy import keeps the snapshot out of the bundle when a live API is used.
+function resolveApi(): typeof liveApi {
+  if (IS_DEMO) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { demoApi } = require("@/lib/demo") as typeof import("@/lib/demo");
+    return demoApi;
+  }
+  return liveApi;
+}
+
+export const api = resolveApi();

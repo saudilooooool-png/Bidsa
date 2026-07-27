@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { IS_DEMO } from "@/lib/api";
 
 const items = [
   { href: "/", label: "الرئيسية" },
@@ -16,6 +17,11 @@ export default function Nav() {
         <Link href="/" className="text-lg font-bold text-ink">
           بيدسا <span className="font-normal text-ink-2">| استخبارات المشتريات</span>
         </Link>
+        {IS_DEMO ? (
+          <span className="rounded-full border px-2 py-0.5 text-xs text-ink-2">
+            نسخة تجريبية — لقطة تاريخية
+          </span>
+        ) : null}
         <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {items.map((it) => (
             <Link key={it.href} href={it.href} className="text-ink-2 hover:text-ink">

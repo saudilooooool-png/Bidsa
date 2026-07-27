@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { IS_DEMO, api } from "@/lib/api";
 import { num, pct, sarCompact } from "@/lib/format";
 import StatTile from "@/components/StatTile";
 import Panel from "@/components/Panel";
@@ -13,6 +13,21 @@ export default async function AgencyProfilePage({
 }) {
   const { id } = await params;
   const p = await api.agencyProfile(Number(id));
+  if (!p) {
+    return (
+      <div className="rounded-lg border bg-surface p-8 text-center">
+        <h1 className="text-lg font-bold text-ink">الملف غير متاح</h1>
+        <p className="mt-2 text-sm text-ink-2">
+          {IS_DEMO
+            ? "النسخة التجريبية تتضمن ملفات أكبر 24 جهة فقط — اربط الخادم الخلفي لعرض كل الجهات."
+            : "لم يتم العثور على هذه الجهة."}
+        </p>
+        <Link href="/agencies" className="mt-4 inline-block text-sm text-accent hover:underline">
+          ← عودة إلى الجهات
+        </Link>
+      </div>
+    );
+  }
   const maxWinner = Math.max(...p.top_winners.map((w) => w.total_award_sar ?? 0), 1);
 
   return (
