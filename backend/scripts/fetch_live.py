@@ -38,45 +38,29 @@ async def run(args: argparse.Namespace) -> int:
     import httpx
     from sqlalchemy import func, select
 
-    from app.core.config import get_settings
     from app.db.session import AsyncSessionLocal
     from app.models.tender import Tender
-    from app.services.etimad_api import (
-        EtimadApiClient, _extract_items, normalize_item,
-    )
+    from app.services.etimad_api import EtimadApiClient, WafChallenge, normalize_item
     from app.services.ingest import ingest_batch
 
-    settings = get_settings()
-
     # ---- probe page 1 with full diagnostics --------------------------------
-    print("→ فحص أولي: صفحة واحدة من اعتماد ...")
+    # Goes through the WAF-aware client path (browser warm-up + challenge
+    # retries with growing delays), same as the real fetch.
+    print("→ فحص أولي: صفحة واحدة من اعتماد (مع تفاوض جدار الحماية) ...")
     async with EtimadApiClient() as client:
-        params = {
-            "PageNumber": 1, "PageSize": settings.ETIMAD_PAGE_SIZE,
-            "PublishDateId": settings.ETIMAD_PUBLISH_DATE_ID,
-            "TenderCategory": settings.ETIMAD_TENDER_CATEGORY,
-            "IsSearch": "true", "SortDirection": "DESC", "Sort": "SubmitionDate",
-        }
         try:
-            resp = await client._client.get(settings.ETIMAD_LIST_PATH, params=params)
+            raw_items = await client.fetch_page_raw(1)
+        except WafChallenge:
+            print("✗ جدار حماية اعتماد أصرّ على التحدي رغم الإحماء وإعادة المحاولات.")
+            print("  انتظر دقيقتين وأعد التشغيل — وإن تكرر أرسل هذه الرسالة للمطوّر.")
+            return 1
         except httpx.HTTPError as exc:
             print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
             return 1
-        body = resp.text
-        if resp.status_code != 200 or "Request Rejected" in body[:500]:
-            print(f"✗ اعتماد رفضت الطلب (HTTP {resp.status_code}).")
-            print("  إن ظهرت 'Request Rejected' فجدار الحماية يحجب عنوان IP هذا —")
-            print("  شغّل السكربت من اتصال داخل السعودية.")
-            print(f"  أول 300 حرف من الرد: {body[:300]!r}")
-            return 1
-        try:
-            payload = resp.json()
         except ValueError:
-            print("✗ الرد ليس JSON — أول 300 حرف:")
-            print(f"  {body[:300]!r}")
+            print("✗ الرد ليس JSON صالحًا — أرسل هذه الرسالة للمطوّر.")
             return 1
 
-        raw_items = _extract_items(payload)
         normalized = [n for n in (normalize_item(i) for i in raw_items) if n]
         print(f"✓ اعتماد استجابت: {len(raw_items)} سجلًا خامًا، {len(normalized)} بعد التطبيع.")
 
@@ -86,8 +70,8 @@ async def run(args: argparse.Namespace) -> int:
             for k, v in raw_items[0].items():
                 print(f"    {k}: {repr(v)[:60]}")
             return 1
-        if isinstance(payload, dict) and not raw_items:
-            print("⚠ لم يُعثر على قائمة سجلات — مفاتيح الرد:", list(payload.keys())[:10])
+        if not raw_items:
+            print("⚠ لم يُعثر على قائمة سجلات في الرد.")
             return 1
 
         if normalized:

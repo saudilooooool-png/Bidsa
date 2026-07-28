@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     ETIMAD_TENDER_CATEGORY: str = ""         # "" = all categories
     ETIMAD_TIMEOUT_SECONDS: float = 30.0
     ETIMAD_MAX_PAGES: int = 200              # safety ceiling per run
+    ETIMAD_PAGE_DELAY_SECONDS: float = 3.0   # pacing between pages (WAF-friendly)
 
     # --- AI / matching ---
     OPENAI_API_KEY: str = ""
