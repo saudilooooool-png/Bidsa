@@ -38,6 +38,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the ETL-change diff below can resolve
 
       - uses: actions/setup-python@v5
         with:
@@ -55,7 +57,26 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      # The historical ETL is a one-time bulk load (already resident in the DB).
+      # Re-running it on every schema/migration change is redundant and, on a
+      # capped tier (e.g. Neon free 512 MB), can fail with DiskFull. Run it only
+      # when the data or the ETL script itself changed, or on manual dispatch.
+      - name: Decide whether to (re)load the warehouse
+        id: etl_gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null || true)
+          if echo "$CHANGED" | grep -Eq '^(etimad-plus-viewer/data/|backend/scripts/etl_historical\.py)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping ETL: no data/ETL-script changes in this push."
+          fi
+
       - name: Load historical warehouse (idempotent)
+        if: steps.etl_gate.outputs.run == 'true'
         working-directory: backend
         run: |
           python scripts/etl_historical.py \
@@ -64,6 +85,7 @@ jobs:
             --report-out ../db/reports/historical_coverage.md
 
       - name: Verify row counts
+        if: steps.etl_gate.outputs.run == 'true'
         run: |
           python - <<'PY'
           import os
