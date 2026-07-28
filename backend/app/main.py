@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, billing, intel, knowledge, proposals, team, tenders
+from app.api import (
+    auth, billing, ingest_push, intel, knowledge, proposals, team, tenders,
+)
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.tasks.scheduler import start_scheduler, stop_scheduler
@@ -40,6 +42,7 @@ app.include_router(billing.router)
 app.include_router(team.router)
 app.include_router(knowledge.router)
 app.include_router(proposals.router)
+app.include_router(ingest_push.router)
 
 
 @app.get("/health")

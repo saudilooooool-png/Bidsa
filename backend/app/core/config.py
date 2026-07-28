@@ -81,6 +81,12 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = "change-me-in-production"
 
+    # Shared secret for the bookmarklet bulk-ingest bridge (/api/v1/ingest/push).
+    # Empty => the endpoint is disabled. Set to a long random string.
+    INGEST_TOKEN: str = ""
+    # Origins allowed to POST to the ingest endpoint (the Etimad site).
+    INGEST_ALLOWED_ORIGIN: str = "https://tenders.etimad.sa"
+
     @property
     def company_activities_list(self) -> list[str]:
         return [a.strip() for a in self.COMPANY_ACTIVITIES.split(",") if a.strip()]
