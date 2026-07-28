@@ -116,38 +116,71 @@ class BrowserFetcher:
         }
         return f"{settings.ETIMAD_BASE_URL}{settings.ETIMAD_LIST_PATH}?{urlencode(params)}"
 
-    async def fetch_page_raw(self, page_number: int) -> list[dict[str, Any]]:
-        """Fetch a page by NAVIGATING to the API URL.
+    def _human_url(self, page_number: int) -> str:
+        """The human-facing tenders page for a given pagination number."""
+        params = {
+            "PageNumber": page_number,
+            "PageSize": settings.ETIMAD_PAGE_SIZE,
+            "IsSearch": "true", "SortDirection": "DESC", "Sort": "SubmitionDate",
+        }
+        return f"{settings.ETIMAD_BASE_URL}{WARMUP_PATH}?{urlencode(params)}"
 
-        A real navigation executes the F5 challenge's JavaScript (which sets the
-        clearance cookie and reloads) — an in-page fetch() cannot, because it
-        never runs the returned HTML's scripts. That was why every fetch()
-        attempt saw the challenge forever.
+    async def fetch_page_raw(self, page_number: int) -> list[dict[str, Any]]:
+        """Capture the tenders PAGE's OWN AJAX call to the async endpoint.
+
+        The human tenders page populates its table by calling
+        AllSupplierTendersForVisitorAsync itself — a call the WAF always clears
+        because it is the site's own traffic with a fully-solved session. We
+        navigate the page and eavesdrop on that response instead of issuing the
+        API call ourselves (which the WAF fingerprints and blocks).
+
+        Falls back to an in-page fetch() if the page fires no such request.
         """
-        url = self._page_url(page_number)
+        url = self._human_url(page_number)
         attempts = len(CHALLENGE_RETRY_DELAYS) + 1
         for attempt in range(attempts):
+            captured: list[str] = []
             try:
-                await self._page.goto(url, wait_until="networkidle", timeout=60_000)
-            except Exception:  # noqa: BLE001 - networkidle may time out on the challenge
+                async with self._page.expect_response(
+                    lambda r: settings.ETIMAD_LIST_PATH in r.url and r.status == 200,
+                    timeout=45_000,
+                ) as resp_info:
+                    await self._page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                resp = await resp_info.value
+                captured.append(await resp.text())
+            except Exception:  # noqa: BLE001 - no matching response in time; try fallback
                 pass
-            raw = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
-            text = _body_text(raw)
-            head = text[:400].lstrip().lower()
-            is_challenge = (not text) or head.startswith("<") or "request rejected" in head \
-                or "requested url was rejected" in head
-            if not is_challenge:
+
+            # fallback: ask the page to make the call itself (same cleared origin)
+            if not captured:
                 try:
-                    return _extract_items(json.loads(text))
-                except json.JSONDecodeError:
-                    is_challenge = True  # not the JSON we expected — treat as challenge
+                    text = await self._page.evaluate(
+                        """async (u) => {
+                             const r = await fetch(u, {credentials:'same-origin',
+                               headers:{'X-Requested-With':'XMLHttpRequest'}});
+                             return await r.text();
+                           }""",
+                        self._page_url(page_number),
+                    )
+                    captured.append(text)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            for text in captured:
+                body = _body_text(text)
+                head = body[:400].lstrip().lower()
+                if body and not head.startswith("<") and "rejected" not in head:
+                    try:
+                        return _extract_items(json.loads(body))
+                    except json.JSONDecodeError:
+                        pass
+
             if attempt < len(CHALLENGE_RETRY_DELAYS):
                 delay = CHALLENGE_RETRY_DELAYS[attempt]
                 logger.warning("browser_waf_challenge_retry",
                                page=page_number, attempt=attempt + 1, delay=delay)
-                # the goto above already ran the challenge JS; give it time to
-                # set the clearance cookie, then retry the navigation.
                 await asyncio.sleep(delay)
+                await self._load_warmup()
         raise WafChallenge(
             f"browser mode: challenge persisted after {attempts} attempts on page {page_number}")
 
