@@ -200,42 +200,56 @@ class EtimadApiClient:
         await asyncio.sleep(settings.ETIMAD_PAGE_DELAY_SECONDS)
 
     async def fetch_all(self, max_pages: int | None = None) -> list[NormalizedTender]:
-        max_pages = max_pages or settings.ETIMAD_MAX_PAGES
-        out: list[NormalizedTender] = []
-        for page in range(1, max_pages + 1):
-            if page > 1:
-                await self._pace()
-            try:
-                batch = await self.fetch_page(page)
-            except Exception as exc:  # noqa: BLE001 - log and stop the run
-                logger.error("etimad_page_failed", page=page, error=str(exc))
-                break
-            if not batch:
-                break
-            out.extend(batch)
-        logger.info("etimad_fetch_all_done", total=len(out))
-        return out
+        return await full_fetch(self, max_pages)
 
     async def fetch_incremental(self, known_refs: set[str], max_pages: int | None = None) -> list[NormalizedTender]:
-        """Stop as soon as a page yields no unseen references (list is date-sorted)."""
-        max_pages = max_pages or settings.ETIMAD_MAX_PAGES
-        out: list[NormalizedTender] = []
-        for page in range(1, max_pages + 1):
-            if page > 1:
-                await self._pace()
-            try:
-                batch = await self.fetch_page(page)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("etimad_page_failed", page=page, error=str(exc))
-                break
-            if not batch:
-                break
-            fresh = [t for t in batch if t["reference_number"] not in known_refs]
-            for t in fresh:
-                known_refs.add(t["reference_number"])
-            out.extend(fresh)
-            if not fresh:
-                logger.info("etimad_incremental_caught_up", stopped_at_page=page)
-                break
-        logger.info("etimad_incremental_done", new=len(out))
-        return out
+        return await incremental_fetch(self, known_refs, max_pages)
+
+
+async def incremental_fetch(fetcher, known_refs: set[str],
+                            max_pages: int | None = None) -> list[NormalizedTender]:
+    """Walk date-sorted pages until one yields no unseen references.
+
+    `fetcher` is any object exposing fetch_page(page) and _pace()
+    (EtimadApiClient or BrowserFetcher).
+    """
+    max_pages = max_pages or settings.ETIMAD_MAX_PAGES
+    out: list[NormalizedTender] = []
+    for page in range(1, max_pages + 1):
+        if page > 1:
+            await fetcher._pace()
+        try:
+            batch = await fetcher.fetch_page(page)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("etimad_page_failed", page=page, error=str(exc))
+            break
+        if not batch:
+            break
+        fresh = [t for t in batch if t["reference_number"] not in known_refs]
+        for t in fresh:
+            known_refs.add(t["reference_number"])
+        out.extend(fresh)
+        if not fresh:
+            logger.info("etimad_incremental_caught_up", stopped_at_page=page)
+            break
+    logger.info("etimad_incremental_done", new=len(out))
+    return out
+
+
+async def full_fetch(fetcher, max_pages: int | None = None) -> list[NormalizedTender]:
+    """Walk every page via any fetcher exposing fetch_page/_pace."""
+    max_pages = max_pages or settings.ETIMAD_MAX_PAGES
+    out: list[NormalizedTender] = []
+    for page in range(1, max_pages + 1):
+        if page > 1:
+            await fetcher._pace()
+        try:
+            batch = await fetcher.fetch_page(page)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("etimad_page_failed", page=page, error=str(exc))
+            break
+        if not batch:
+            break
+        out.extend(batch)
+    logger.info("etimad_fetch_all_done", total=len(out))
+    return out

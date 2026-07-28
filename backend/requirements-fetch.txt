@@ -8,3 +8,6 @@ pydantic==2.10.3
 pydantic-settings==2.6.1
 python-dotenv==1.0.1
 structlog==24.4.0
+# Browser mode (defeats Etimad's JS WAF challenge). After pip install run:
+#   python -m playwright install chromium
+playwright==1.49.0

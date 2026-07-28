@@ -40,27 +40,55 @@ async def run(args: argparse.Namespace) -> int:
 
     from app.db.session import AsyncSessionLocal
     from app.models.tender import Tender
-    from app.services.etimad_api import EtimadApiClient, WafChallenge, normalize_item
+    from app.services.etimad_api import (
+        EtimadApiClient, WafChallenge, full_fetch, incremental_fetch, normalize_item,
+    )
     from app.services.ingest import ingest_batch
 
-    # ---- probe page 1 with full diagnostics --------------------------------
-    # Goes through the WAF-aware client path (browser warm-up + challenge
-    # retries with growing delays), same as the real fetch.
-    print("→ فحص أولي: صفحة واحدة من اعتماد (مع تفاوض جدار الحماية) ...")
-    async with EtimadApiClient() as client:
-        try:
-            raw_items = await client.fetch_page_raw(1)
-        except WafChallenge:
-            print("✗ جدار حماية اعتماد أصرّ على التحدي رغم الإحماء وإعادة المحاولات.")
-            print("  انتظر دقيقتين وأعد التشغيل — وإن تكرر أرسل هذه الرسالة للمطوّر.")
-            return 1
-        except httpx.HTTPError as exc:
-            print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
-            return 1
-        except ValueError:
-            print("✗ الرد ليس JSON صالحًا — أرسل هذه الرسالة للمطوّر.")
-            return 1
+    async def open_fetcher():
+        """Probe page 1; on a persistent WAF challenge fall back to a real browser.
 
+        Returns (fetcher, raw_items) with the fetcher still open, or (None, None).
+        """
+        if not args.browser:
+            print("→ فحص أولي عبر HTTP (مع تفاوض جدار الحماية) ...")
+            client = EtimadApiClient()
+            try:
+                raw = await client.fetch_page_raw(1)
+                return client, raw
+            except WafChallenge:
+                await client.__aexit__()
+                print("⚠ الجدار أصرّ على تحدي JavaScript — التبديل إلى وضع المتصفح الخفي ...")
+            except httpx.HTTPError as exc:
+                await client.__aexit__()
+                print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
+                return None, None
+        else:
+            print("→ وضع المتصفح الخفي (مطلوب بـ --browser) ...")
+
+        try:
+            from app.services.etimad_browser import BrowserFetcher
+            browser = BrowserFetcher()
+            await browser.__aenter__()
+        except RuntimeError as exc:
+            print(f"✗ {exc}")
+            print("  ثبّت المتصفح ثم أعد المحاولة:")
+            print("    py -3.12 -m pip install playwright")
+            print("    py -3.12 -m playwright install chromium")
+            return None, None
+        try:
+            raw = await browser.fetch_page_raw(1)
+            return browser, raw
+        except WafChallenge:
+            await browser.__aexit__()
+            print("✗ حتى المتصفح الحقيقي رُفض — انتظر عشر دقائق وأعد المحاولة،")
+            print("  وإن تكرر أرسل هذه الرسالة للمطوّر.")
+            return None, None
+
+    fetcher, raw_items = await open_fetcher()
+    if fetcher is None:
+        return 1
+    try:
         normalized = [n for n in (normalize_item(i) for i in raw_items) if n]
         print(f"✓ اعتماد استجابت: {len(raw_items)} سجلًا خامًا، {len(normalized)} بعد التطبيع.")
 
@@ -84,16 +112,18 @@ async def run(args: argparse.Namespace) -> int:
             print("\n(وضع الفحص --dry-run: لا كتابة في قاعدة البيانات.)")
             return 0
 
-        # ---- real fetch ----------------------------------------------------
+        # ---- real fetch (same already-negotiated fetcher) -------------------
         async with AsyncSessionLocal() as session:
             known = set((await session.execute(select(Tender.reference_number))).scalars().all())
         print(f"→ في القاعدة حاليًا: {len(known):,} منافسة. بدء الجلب "
               f"({'كامل' if args.full else 'تزايدي — يتوقف عند أول صفحة بلا جديد'}) ...")
         if args.full:
-            items = await client.fetch_all(max_pages=args.max_pages)
+            items = await full_fetch(fetcher, max_pages=args.max_pages)
             items = [t for t in items if t["reference_number"] not in known] or items
         else:
-            items = await client.fetch_incremental(known, max_pages=args.max_pages)
+            items = await incremental_fetch(fetcher, known, max_pages=args.max_pages)
+    finally:
+        await fetcher.__aexit__()
 
     if not items:
         print("✓ لا سجلات جديدة منذ آخر جلب — كل شيء محدّث.")
@@ -119,6 +149,8 @@ def main() -> None:
                     help="fetch one page and print it — no database writes")
     ap.add_argument("--full", action="store_true",
                     help="walk every page instead of stopping at the first known one")
+    ap.add_argument("--browser", action="store_true",
+                    help="skip HTTP mode and go straight to the headless browser")
     ap.add_argument("--max-pages", type=int, default=100)
     args = ap.parse_args()
 

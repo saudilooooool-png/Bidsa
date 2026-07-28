@@ -53,6 +53,10 @@ Step "Installing fetch dependencies"
 & $pyExe $pyVer -m pip install --quiet --disable-pip-version-check -r (Join-Path $Backend "requirements-fetch.txt")
 if ($LASTEXITCODE -ne 0) { Write-Host "Dependency install failed." -ForegroundColor Red; exit 1 }
 
+Step "Installing headless Chromium for browser mode (first run downloads ~130MB)"
+& $pyExe $pyVer -m playwright install chromium
+if ($LASTEXITCODE -ne 0) { Write-Host "Chromium install failed." -ForegroundColor Red; exit 1 }
+
 # --- 3. database URL (asked once, stored in backend\.env) --------------------
 Step "Database URL"
 $existing = ""
