@@ -1,0 +1,10 @@
+# Minimal dependencies for scripts/fetch_live.py (run from your own machine).
+httpx==0.28.1
+tenacity==9.0.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+pgvector==0.3.6
+pydantic==2.10.3
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+structlog==24.4.0

@@ -4,8 +4,8 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer,
-    String, Text, func,
+    BigInteger, Boolean, CheckConstraint, Computed, DateTime, ForeignKey,
+    Integer, String, Text, func,
 )
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -67,7 +67,17 @@ class Tender(Base):
 
     # RAG embedding + generated full-text vector (DB-managed, read-only here)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
-    search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
+    # Computed => SQLAlchemy never writes it (Postgres GENERATED ALWAYS rejects
+    # any INSERT/UPDATE value, NULL included). Expression mirrors db/schema.sql.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('simple', coalesce(title, '')), 'A') || "
+            "setweight(to_tsvector('simple', coalesce(description, '')), 'B') || "
+            "setweight(to_tsvector('simple', coalesce(reference_number, '')), 'C')",
+            persisted=True,
+        ),
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
