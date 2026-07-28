@@ -45,71 +45,54 @@ async def run(args: argparse.Namespace) -> int:
     )
     from app.services.ingest import ingest_batch
 
-    async def open_browser():
-        """Open a headless-browser fetcher, or return None with guidance."""
+    # Etimad's F5 WAF grants roughly ONE clearance per client IP and then
+    # challenges everything else, so we use a SINGLE browser session for both
+    # the field-check and the real fetch — no separate HTTP probe (its requests
+    # would burn the IP's clearance and leave the browser facing a hard block).
+    if args.http:
+        print("→ وضع HTTP (تجريبي — يصمد لصفحة واحدة فقط عادةً) ...")
+        fetcher: object = EtimadApiClient()
+        await fetcher.__aenter__()
+    else:
+        print("→ فتح المتصفح الخفي والاتصال بمنصة اعتماد ...")
         try:
             from app.services.etimad_browser import BrowserFetcher
-            browser = BrowserFetcher()
-            await browser.__aenter__()
-            return browser
+            fetcher = BrowserFetcher()
+            await fetcher.__aenter__()
         except RuntimeError as exc:
             print(f"✗ {exc}")
             print("  ثبّت المتصفح ثم أعد المحاولة:")
             print("    py -3.12 -m pip install playwright")
             print("    py -3.12 -m playwright install chromium")
-            return None
-
-    # ---- PROBE (fast HTTP, browser fallback) — validates connectivity + fields
-    probe_raw = None
-    probe_is_browser = args.browser
-    if not args.browser:
-        print("→ فحص أولي عبر HTTP (مع تفاوض جدار الحماية) ...")
-        client = EtimadApiClient()
-        try:
-            probe_raw = await client.fetch_page_raw(1)
-        except WafChallenge:
-            print("⚠ الجدار أصرّ على تحدي JavaScript في الفحص — سنعتمد المتصفح.")
-            probe_is_browser = True
-        except httpx.HTTPError as exc:
-            print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
-            await client.__aexit__()
-            return 1
-        finally:
-            await client.__aexit__()
-
-    # The real multi-page fetch ALWAYS needs the browser: a plain HTTP session
-    # passes only its first request, then the WAF challenges every subsequent
-    # page. The browser holds one JS-solved session across all pages.
-    browser = None
-    if probe_is_browser or not args.dry_run:
-        browser = await open_browser()
-        if browser is None:
             return 1
 
     try:
-        if probe_raw is None:  # HTTP probe was challenged — use the browser
-            print("→ فحص عبر المتصفح الخفي ...")
-            try:
-                probe_raw = await browser.fetch_page_raw(1)
-            except WafChallenge:
-                print("✗ حتى المتصفح رُفض — انتظر عشر دقائق وأعد المحاولة،")
-                print("  وإن تكرر أرسل هذه الرسالة للمطوّر.")
-                return 1
+        # page 1 doubles as the field-check; reused as the fetch's seed so we
+        # never request it twice (the duplicate rapid call is what re-arms WAF).
+        try:
+            page1_raw = await fetcher.fetch_page_raw(1)
+        except WafChallenge:
+            print("✗ رفض جدار حماية اعتماد الطلب رغم المتصفح.")
+            print("  انتظر ~10 دقائق (حتى تُرفع القيود عن عنوانك) وأعد المحاولة.")
+            print("  إن تكرر: جرّب من شبكة/جوال مختلف، أو أرسل هذه الرسالة للمطوّر.")
+            return 1
+        except (httpx.HTTPError, ValueError) as exc:
+            print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
+            return 1
 
-        normalized = [n for n in (normalize_item(i) for i in probe_raw) if n]
-        print(f"✓ اعتماد استجابت: {len(probe_raw)} سجلًا خامًا، {len(normalized)} بعد التطبيع.")
-
-        if probe_raw and not normalized:
+        page1 = [n for n in (normalize_item(i) for i in page1_raw) if n]
+        print(f"✓ اعتماد استجابت: {len(page1_raw)} سجلًا خامًا، {len(page1)} بعد التطبيع.")
+        if page1_raw and not page1:
             print("\n⚠ التطبيع أسقط كل السجلات — أسماء الحقول تغيّرت على الأرجح.")
             print("  مفاتيح أول سجل خام (أرسلها للمطوّر لتحديث FIELD_MAP):")
-            for k, v in probe_raw[0].items():
+            for k, v in page1_raw[0].items():
                 print(f"    {k}: {repr(v)[:60]}")
             return 1
-        if not probe_raw:
+        if not page1_raw:
             print("⚠ لم يُعثر على قائمة سجلات في الرد.")
             return 1
 
-        sample = dict(normalized[0])
+        sample = dict(page1[0])
         sample.pop("raw", None)
         print("  عيّنة سجل مطبّع:")
         print(json.dumps(sample, ensure_ascii=False, indent=2)[:600])
@@ -118,22 +101,17 @@ async def run(args: argparse.Namespace) -> int:
             print("\n(وضع الفحص --dry-run: لا كتابة في قاعدة البيانات.)")
             return 0
 
-        # ---- real fetch via the browser, seeding page 1 from the probe ------
-        # Seed only when the probe's page 1 came from THIS browser session;
-        # an HTTP-probed page 1 belongs to a closed session, so re-fetch it.
-        seed = normalized if probe_is_browser else None
         async with AsyncSessionLocal() as session:
             known = set((await session.execute(select(Tender.reference_number))).scalars().all())
-        print(f"→ في القاعدة حاليًا: {len(known):,} منافسة. بدء الجلب عبر المتصفح "
+        print(f"→ في القاعدة حاليًا: {len(known):,} منافسة. متابعة الجلب "
               f"({'كامل' if args.full else 'تزايدي — يتوقف عند أول صفحة بلا جديد'}) ...")
         if args.full:
-            items = await full_fetch(browser, max_pages=args.max_pages, seed_page1=seed)
+            items = await full_fetch(fetcher, max_pages=args.max_pages, seed_page1=page1)
             items = [t for t in items if t["reference_number"] not in known] or items
         else:
-            items = await incremental_fetch(browser, known, max_pages=args.max_pages, seed_page1=seed)
+            items = await incremental_fetch(fetcher, known, max_pages=args.max_pages, seed_page1=page1)
     finally:
-        if browser is not None:
-            await browser.__aexit__()
+        await fetcher.__aexit__()
 
     if not items:
         print("✓ لا سجلات جديدة منذ آخر جلب — كل شيء محدّث.")
@@ -159,8 +137,8 @@ def main() -> None:
                     help="fetch one page and print it — no database writes")
     ap.add_argument("--full", action="store_true",
                     help="walk every page instead of stopping at the first known one")
-    ap.add_argument("--browser", action="store_true",
-                    help="skip HTTP mode and go straight to the headless browser")
+    ap.add_argument("--http", action="store_true",
+                    help="use the plain HTTP client instead of the browser (rarely works past page 1)")
     ap.add_argument("--max-pages", type=int, default=100)
     args = ap.parse_args()
 

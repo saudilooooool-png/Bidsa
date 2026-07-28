@@ -80,10 +80,17 @@ class BrowserFetcher:
             await self._pw.stop()
 
     async def _load_warmup(self) -> None:
-        """Open the tenders page and give any challenge script time to settle."""
-        await self._page.goto(settings.ETIMAD_BASE_URL + WARMUP_PATH,
-                              wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(3)
+        """Open the tenders page and let the WAF's challenge script run + settle.
+
+        networkidle waits for the F5 challenge round-trip (which sets the
+        clearance cookie) to finish before we start issuing JSON calls.
+        """
+        try:
+            await self._page.goto(settings.ETIMAD_BASE_URL + WARMUP_PATH,
+                                  wait_until="networkidle", timeout=60_000)
+        except Exception:  # noqa: BLE001 - networkidle can time out; DOM is enough
+            pass
+        await asyncio.sleep(4)
         logger.info("browser_warmup_done", url=self._page.url)
 
     async def _pace(self) -> None:

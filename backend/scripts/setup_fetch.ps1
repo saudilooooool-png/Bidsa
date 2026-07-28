@@ -73,19 +73,22 @@ if (-not $existing) { Write-Host "No URL provided - stopping." -ForegroundColor 
 [IO.File]::WriteAllText($EnvFile, "DATABASE_URL=$existing`n", (New-Object Text.UTF8Encoding $false))
 Write-Host "Saved to backend\.env - you will not be asked again."
 
-# --- 4. probe then fetch -----------------------------------------------------
-Step "Probing Etimad (--dry-run, no database writes)"
+# --- 4. fetch ----------------------------------------------------------------
+# One browser session does the field-check AND the fetch. We deliberately do
+# NOT run a separate --dry-run first: Etimad's WAF clears roughly one attempt
+# per IP, so a throwaway probe would burn it and make the real fetch fail.
 Push-Location $Backend
 try {
-    & $pyExe $pyVer "scripts\fetch_live.py" --dry-run
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "`nProbe FAILED - send the output above to the developer. Skipping the real fetch." -ForegroundColor Red
-        exit 1
-    }
-    if (-not $SkipFetch) {
-        Step "Running the real fetch into the production database"
+    if ($SkipFetch) {
+        Step "Field-check only (--dry-run, no database writes)"
+        & $pyExe $pyVer "scripts\fetch_live.py" --dry-run
+    } else {
+        Step "Fetching from Etimad into the production database (browser mode)"
         & $pyExe $pyVer "scripts\fetch_live.py"
-        if ($LASTEXITCODE -ne 0) { Write-Host "Fetch failed - send the output to the developer." -ForegroundColor Red; exit 1 }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`nFetch did not complete - send the output above to the developer." -ForegroundColor Red
+        exit 1
     }
 } finally { Pop-Location }
 
