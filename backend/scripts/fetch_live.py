@@ -141,7 +141,15 @@ def main() -> None:
     if args.db:
         os.environ["DATABASE_URL"] = args.db
     if not args.dry_run and not os.environ.get("DATABASE_URL"):
-        ap.error("set DATABASE_URL (Neon URL) or pass --db, or use --dry-run")
+        # allow a persisted backend/.env (written by setup_fetch.ps1)
+        env_file = Path(__file__).resolve().parents[1] / ".env"
+        if env_file.is_file():
+            for line in env_file.read_text(encoding="utf-8-sig").splitlines():
+                if line.strip().startswith("DATABASE_URL="):
+                    os.environ["DATABASE_URL"] = line.split("=", 1)[1].strip().strip('"')
+                    break
+    if not args.dry_run and not os.environ.get("DATABASE_URL"):
+        ap.error("set DATABASE_URL (Neon URL), pass --db, run setup_fetch.ps1 once, or use --dry-run")
 
     raise SystemExit(asyncio.run(run(args)))
 
