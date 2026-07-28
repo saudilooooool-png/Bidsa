@@ -4,7 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.tasks.scrape_task import run_enrichment_job, run_ingest_job
+from app.tasks.scrape_task import run_digest_job, run_enrichment_job, run_ingest_job
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -31,6 +31,11 @@ def start_scheduler() -> None:
     scheduler.add_job(
         run_enrichment_job, IntervalTrigger(minutes=max(settings.SCRAPER_INTERVAL_MINUTES // 2, 10)),
         id="enrich_tenders", name="AI enrichment", replace_existing=True, max_instances=1,
+    )
+    scheduler.add_job(
+        run_digest_job, IntervalTrigger(hours=6),
+        id="alert_digests", name="Tender-alert email digests",
+        replace_existing=True, max_instances=1,
     )
     scheduler.start()
     logger.info("scheduler_started", interval=settings.SCRAPER_INTERVAL_MINUTES)

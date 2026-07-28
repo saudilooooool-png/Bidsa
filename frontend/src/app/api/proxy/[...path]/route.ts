@@ -11,6 +11,7 @@ const ALLOWED_PREFIXES = [
   "knowledge/documents",
   "proposals/generate",
   "billing/upgrade-request",
+  "alerts",
 ];
 
 async function forward(req: NextRequest, pathParts: string[], method: string) {
@@ -31,12 +32,20 @@ async function forward(req: NextRequest, pathParts: string[], method: string) {
   if (contentType) headers["Content-Type"] = contentType;
 
   // Buffering keeps multipart bodies (with their boundary header) intact.
-  const body = method === "DELETE" ? undefined : Buffer.from(await req.arrayBuffer());
+  const body =
+    method === "DELETE" || method === "GET" ? undefined : Buffer.from(await req.arrayBuffer());
   const res = await fetch(`${API_URL}/api/v1/${path}`, {
     method, headers, body, cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
   return NextResponse.json(data, { status: res.status });
+}
+
+export async function GET(
+  req: NextRequest, ctx: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await ctx.params;
+  return forward(req, path, "GET");
 }
 
 export async function POST(

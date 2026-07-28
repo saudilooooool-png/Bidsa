@@ -148,6 +148,26 @@ export interface Lookups {
   regions: LookupItem[];
 }
 
+export interface FeedItem {
+  tender_id: string;
+  reference_number: string;
+  title: string;
+  deadline: string | null;
+  days_left: number | null;
+  details_url: string | null;
+  bids_count: number | null;
+  agency: string | null;
+  activity: string | null;
+  region: string | null;
+}
+
+export interface FeedPage {
+  total: number;
+  page: number;
+  page_size: number;
+  items: FeedItem[];
+}
+
 // ---- fetchers ---------------------------------------------------------------
 
 const liveApi = {
@@ -173,6 +193,7 @@ const liveApi = {
   companyProfile: (id: number) =>
     getOrNull<CompanyProfile>(`/api/v1/intel/companies/${id}`),
   lookups: () => get<Lookups>("/api/v1/intel/lookups"),
+  feed: (params: URLSearchParams) => get<FeedPage>(`/api/v1/feed?${params.toString()}`),
 };
 
 // Lazy import keeps the snapshot out of the bundle when a live API is used.

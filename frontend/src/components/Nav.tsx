@@ -5,6 +5,7 @@ import { num } from "@/lib/format";
 
 const intelItems = [
   { href: "/", label: "الرئيسية" },
+  { href: "/tenders", label: "المنافسات المفتوحة" },
   { href: "/agencies", label: "الجهات" },
   { href: "/companies", label: "الشركات" },
   { href: "/pricing", label: "التسعير المعياري" },
@@ -13,6 +14,7 @@ const intelItems = [
 ];
 
 const workspaceItems = [
+  { href: "/alerts", label: "تنبيهاتي" },
   { href: "/matching", label: "المطابقة و RFP" },
   { href: "/proposals", label: "مسوداتي" },
   { href: "/settings", label: "الإعدادات" },

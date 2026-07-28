@@ -31,6 +31,13 @@ async def run_ingest_job(incremental: bool = True) -> dict:
         return await ingest_batch(session, items)
 
 
+async def run_digest_job() -> dict:
+    """Send tender-alert email digests for saved searches with new matches."""
+    from app.services.digest import run_digests
+    async with AsyncSessionLocal() as session:
+        return await run_digests(session)
+
+
 async def run_enrichment_job(limit: int = 50) -> dict:
     """Run AI enrichment on tenders that have no ai_summary yet."""
     enricher = TenderEnricher()

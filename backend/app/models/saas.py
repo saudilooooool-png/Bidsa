@@ -64,6 +64,20 @@ class KnowledgeChunk(Base):
     __table_args__ = (UniqueConstraint("document_id", "chunk_index", name="uq_chunk_doc_index"),)
 
 
+class SavedSearch(Base):
+    __tablename__ = "saved_searches"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    keywords: Mapped[str | None] = mapped_column(Text)
+    activity_id: Mapped[int | None] = mapped_column(Integer)
+    region_id: Mapped[int | None] = mapped_column(Integer)
+    notify_email: Mapped[bool] = mapped_column(nullable=False, default=True)
+    last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class BidProposal(Base):
     __tablename__ = "bid_proposals"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())

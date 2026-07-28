@@ -11,7 +11,7 @@
  */
 import type {
   AgencyProfile, AgencyRow, CompanyProfile, CompanySearchRow, CompetitionRow,
-  Lookups, MatchmakingRow, Overview, PricingBenchmark,
+  FeedPage, Lookups, MatchmakingRow, Overview, PricingBenchmark,
 } from "@/lib/api";
 
 import overviewJson from "@/data/demo/overview.json";
@@ -82,4 +82,10 @@ export const demoApi = {
 
   companyProfile: async (id: number): Promise<CompanyProfile | null> =>
     companyProfiles[String(id)] ?? null,
+
+  // The demo snapshot is historical (awarded) data — no live open feed.
+  feed: async (params: URLSearchParams): Promise<FeedPage> => ({
+    total: 0, page: Number(params.get("page") ?? 1),
+    page_size: Number(params.get("page_size") ?? 20), items: [],
+  }),
 };

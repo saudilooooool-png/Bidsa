@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     SCRAPER_INTERVAL_MINUTES: int = 60
     ENABLE_SCHEDULER: bool = True
 
+    # --- Email (tender-alert digests). Empty SMTP_HOST => digests are skipped ---
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "بيدسا <no-reply@bidsa.app>"
+    PUBLIC_APP_URL: str = "https://bidsa.vercel.app"
+
     SECRET_KEY: str = "change-me-in-production"
 
     # Shared secret for the bookmarklet bulk-ingest bridge (/api/v1/ingest/push).
