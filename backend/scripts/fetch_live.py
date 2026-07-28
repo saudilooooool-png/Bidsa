@@ -45,85 +45,95 @@ async def run(args: argparse.Namespace) -> int:
     )
     from app.services.ingest import ingest_batch
 
-    async def open_fetcher():
-        """Probe page 1; on a persistent WAF challenge fall back to a real browser.
-
-        Returns (fetcher, raw_items) with the fetcher still open, or (None, None).
-        """
-        if not args.browser:
-            print("→ فحص أولي عبر HTTP (مع تفاوض جدار الحماية) ...")
-            client = EtimadApiClient()
-            try:
-                raw = await client.fetch_page_raw(1)
-                return client, raw
-            except WafChallenge:
-                await client.__aexit__()
-                print("⚠ الجدار أصرّ على تحدي JavaScript — التبديل إلى وضع المتصفح الخفي ...")
-            except httpx.HTTPError as exc:
-                await client.__aexit__()
-                print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
-                return None, None
-        else:
-            print("→ وضع المتصفح الخفي (مطلوب بـ --browser) ...")
-
+    async def open_browser():
+        """Open a headless-browser fetcher, or return None with guidance."""
         try:
             from app.services.etimad_browser import BrowserFetcher
             browser = BrowserFetcher()
             await browser.__aenter__()
+            return browser
         except RuntimeError as exc:
             print(f"✗ {exc}")
             print("  ثبّت المتصفح ثم أعد المحاولة:")
             print("    py -3.12 -m pip install playwright")
             print("    py -3.12 -m playwright install chromium")
-            return None, None
+            return None
+
+    # ---- PROBE (fast HTTP, browser fallback) — validates connectivity + fields
+    probe_raw = None
+    probe_is_browser = args.browser
+    if not args.browser:
+        print("→ فحص أولي عبر HTTP (مع تفاوض جدار الحماية) ...")
+        client = EtimadApiClient()
         try:
-            raw = await browser.fetch_page_raw(1)
-            return browser, raw
+            probe_raw = await client.fetch_page_raw(1)
         except WafChallenge:
-            await browser.__aexit__()
-            print("✗ حتى المتصفح الحقيقي رُفض — انتظر عشر دقائق وأعد المحاولة،")
-            print("  وإن تكرر أرسل هذه الرسالة للمطوّر.")
-            return None, None
+            print("⚠ الجدار أصرّ على تحدي JavaScript في الفحص — سنعتمد المتصفح.")
+            probe_is_browser = True
+        except httpx.HTTPError as exc:
+            print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
+            await client.__aexit__()
+            return 1
+        finally:
+            await client.__aexit__()
 
-    fetcher, raw_items = await open_fetcher()
-    if fetcher is None:
-        return 1
+    # The real multi-page fetch ALWAYS needs the browser: a plain HTTP session
+    # passes only its first request, then the WAF challenges every subsequent
+    # page. The browser holds one JS-solved session across all pages.
+    browser = None
+    if probe_is_browser or not args.dry_run:
+        browser = await open_browser()
+        if browser is None:
+            return 1
+
     try:
-        normalized = [n for n in (normalize_item(i) for i in raw_items) if n]
-        print(f"✓ اعتماد استجابت: {len(raw_items)} سجلًا خامًا، {len(normalized)} بعد التطبيع.")
+        if probe_raw is None:  # HTTP probe was challenged — use the browser
+            print("→ فحص عبر المتصفح الخفي ...")
+            try:
+                probe_raw = await browser.fetch_page_raw(1)
+            except WafChallenge:
+                print("✗ حتى المتصفح رُفض — انتظر عشر دقائق وأعد المحاولة،")
+                print("  وإن تكرر أرسل هذه الرسالة للمطوّر.")
+                return 1
 
-        if raw_items and not normalized:
+        normalized = [n for n in (normalize_item(i) for i in probe_raw) if n]
+        print(f"✓ اعتماد استجابت: {len(probe_raw)} سجلًا خامًا، {len(normalized)} بعد التطبيع.")
+
+        if probe_raw and not normalized:
             print("\n⚠ التطبيع أسقط كل السجلات — أسماء الحقول تغيّرت على الأرجح.")
             print("  مفاتيح أول سجل خام (أرسلها للمطوّر لتحديث FIELD_MAP):")
-            for k, v in raw_items[0].items():
+            for k, v in probe_raw[0].items():
                 print(f"    {k}: {repr(v)[:60]}")
             return 1
-        if not raw_items:
+        if not probe_raw:
             print("⚠ لم يُعثر على قائمة سجلات في الرد.")
             return 1
 
-        if normalized:
-            sample = dict(normalized[0])
-            sample.pop("raw", None)
-            print("  عيّنة سجل مطبّع:")
-            print(json.dumps(sample, ensure_ascii=False, indent=2)[:600])
+        sample = dict(normalized[0])
+        sample.pop("raw", None)
+        print("  عيّنة سجل مطبّع:")
+        print(json.dumps(sample, ensure_ascii=False, indent=2)[:600])
 
         if args.dry_run:
             print("\n(وضع الفحص --dry-run: لا كتابة في قاعدة البيانات.)")
             return 0
 
-        # ---- real fetch (same already-negotiated fetcher) -------------------
+        # ---- real fetch via the browser, seeding page 1 from the probe ------
+        # Seed only when the probe's page 1 came from THIS browser session;
+        # an HTTP-probed page 1 belongs to a closed session, so re-fetch it.
+        seed = normalized if probe_is_browser else None
         async with AsyncSessionLocal() as session:
             known = set((await session.execute(select(Tender.reference_number))).scalars().all())
-        print(f"→ في القاعدة حاليًا: {len(known):,} منافسة. بدء الجلب "
+        print(f"→ في القاعدة حاليًا: {len(known):,} منافسة. بدء الجلب عبر المتصفح "
               f"({'كامل' if args.full else 'تزايدي — يتوقف عند أول صفحة بلا جديد'}) ...")
         if args.full:
-            items = await full_fetch(fetcher, max_pages=args.max_pages)
+            items = await full_fetch(browser, max_pages=args.max_pages, seed_page1=seed)
             items = [t for t in items if t["reference_number"] not in known] or items
         else:
-            items = await incremental_fetch(fetcher, known, max_pages=args.max_pages)
+            items = await incremental_fetch(browser, known, max_pages=args.max_pages, seed_page1=seed)
     finally:
-        await fetcher.__aexit__()
+        if browser is not None:
+            await browser.__aexit__()
 
     if not items:
         print("✓ لا سجلات جديدة منذ آخر جلب — كل شيء محدّث.")

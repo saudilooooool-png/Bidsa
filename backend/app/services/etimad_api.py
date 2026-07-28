@@ -206,20 +206,29 @@ class EtimadApiClient:
         return await incremental_fetch(self, known_refs, max_pages)
 
 
+async def _page_batch(fetcher, page: int, seed_page1: list[NormalizedTender] | None):
+    """Return page `page`'s normalized batch, using the seed for page 1 if given."""
+    if page == 1 and seed_page1 is not None:
+        return seed_page1
+    if page > 1:
+        await fetcher._pace()
+    return await fetcher.fetch_page(page)
+
+
 async def incremental_fetch(fetcher, known_refs: set[str],
-                            max_pages: int | None = None) -> list[NormalizedTender]:
+                            max_pages: int | None = None,
+                            seed_page1: list[NormalizedTender] | None = None) -> list[NormalizedTender]:
     """Walk date-sorted pages until one yields no unseen references.
 
-    `fetcher` is any object exposing fetch_page(page) and _pace()
-    (EtimadApiClient or BrowserFetcher).
+    `fetcher` exposes fetch_page(page) and _pace() (EtimadApiClient or
+    BrowserFetcher). `seed_page1` (already-fetched page 1) avoids re-requesting
+    it — the duplicate rapid request is exactly what arms the WAF.
     """
     max_pages = max_pages or settings.ETIMAD_MAX_PAGES
     out: list[NormalizedTender] = []
     for page in range(1, max_pages + 1):
-        if page > 1:
-            await fetcher._pace()
         try:
-            batch = await fetcher.fetch_page(page)
+            batch = await _page_batch(fetcher, page, seed_page1)
         except Exception as exc:  # noqa: BLE001
             logger.error("etimad_page_failed", page=page, error=str(exc))
             break
@@ -236,15 +245,14 @@ async def incremental_fetch(fetcher, known_refs: set[str],
     return out
 
 
-async def full_fetch(fetcher, max_pages: int | None = None) -> list[NormalizedTender]:
+async def full_fetch(fetcher, max_pages: int | None = None,
+                     seed_page1: list[NormalizedTender] | None = None) -> list[NormalizedTender]:
     """Walk every page via any fetcher exposing fetch_page/_pace."""
     max_pages = max_pages or settings.ETIMAD_MAX_PAGES
     out: list[NormalizedTender] = []
     for page in range(1, max_pages + 1):
-        if page > 1:
-            await fetcher._pace()
         try:
-            batch = await fetcher.fetch_page(page)
+            batch = await _page_batch(fetcher, page, seed_page1)
         except Exception as exc:  # noqa: BLE001
             logger.error("etimad_page_failed", page=page, error=str(exc))
             break
