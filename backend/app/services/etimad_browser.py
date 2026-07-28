@@ -26,18 +26,13 @@ from app.services.etimad_api import (
 logger = get_logger(__name__)
 settings = get_settings()
 
-_FETCH_JS = """
-async (url) => {
-  const r = await fetch(url, {
-    headers: {
-      'X-Requested-With': 'XMLHttpRequest',
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-    },
-    credentials: 'same-origin',
-  });
-  return await r.text();
-}
-"""
+def _body_text(raw: str) -> str:
+    """Chromium wraps a raw JSON document in <pre>; unwrap when present."""
+    s = raw.strip()
+    if s.startswith("<pre") and "</pre>" in s:
+        inner = s[s.index(">") + 1: s.rindex("</pre>")]
+        return inner.strip()
+    return s
 
 
 class BrowserFetcher:
@@ -56,18 +51,33 @@ class BrowserFetcher:
                 "browser mode needs playwright: "
                 "pip install playwright && playwright install chromium") from exc
         self._pw = await async_playwright().start()
-        # Optional override for environments that ship their own Chromium
-        # (e.g. a preinstalled binary); otherwise Playwright's managed build.
         exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
-        launch_kwargs: dict[str, Any] = {"headless": True,
-                                         "args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+        # ETIMAD_HEADFUL=1 shows a real window — the hardest mode for a WAF to
+        # flag as a bot, used as a fallback when headless is challenged.
+        headless = os.environ.get("ETIMAD_HEADFUL", "") not in ("1", "true", "yes")
+        launch_kwargs: dict[str, Any] = {
+            "headless": headless,
+            "args": [
+                "--no-sandbox", "--disable-dev-shm-usage",
+                # defeat the most common headless/automation fingerprints
+                "--disable-blink-features=AutomationControlled",
+            ],
+        }
         if exe:
             launch_kwargs["executable_path"] = exe
         self._browser = await self._pw.chromium.launch(**launch_kwargs)
         context = await self._browser.new_context(
             locale="ar-SA", timezone_id="Asia/Riyadh",
+            viewport={"width": 1366, "height": 768},
             user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+        )
+        # Hide the automation tells F5 checks first (navigator.webdriver etc.).
+        await context.add_init_script(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            "window.chrome={runtime:{}};"
+            "Object.defineProperty(navigator,'languages',{get:()=>['ar-SA','ar','en-US']});"
+            "Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});"
         )
         self._page = await context.new_page()
         await self._load_warmup()
@@ -107,18 +117,37 @@ class BrowserFetcher:
         return f"{settings.ETIMAD_BASE_URL}{settings.ETIMAD_LIST_PATH}?{urlencode(params)}"
 
     async def fetch_page_raw(self, page_number: int) -> list[dict[str, Any]]:
+        """Fetch a page by NAVIGATING to the API URL.
+
+        A real navigation executes the F5 challenge's JavaScript (which sets the
+        clearance cookie and reloads) — an in-page fetch() cannot, because it
+        never runs the returned HTML's scripts. That was why every fetch()
+        attempt saw the challenge forever.
+        """
+        url = self._page_url(page_number)
         attempts = len(CHALLENGE_RETRY_DELAYS) + 1
         for attempt in range(attempts):
-            text = await self._page.evaluate(_FETCH_JS, self._page_url(page_number))
+            try:
+                await self._page.goto(url, wait_until="networkidle", timeout=60_000)
+            except Exception:  # noqa: BLE001 - networkidle may time out on the challenge
+                pass
+            raw = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
+            text = _body_text(raw)
             head = text[:400].lstrip().lower()
-            if not (head.startswith("<") or "request rejected" in head):
-                return _extract_items(json.loads(text))
+            is_challenge = (not text) or head.startswith("<") or "request rejected" in head \
+                or "requested url was rejected" in head
+            if not is_challenge:
+                try:
+                    return _extract_items(json.loads(text))
+                except json.JSONDecodeError:
+                    is_challenge = True  # not the JSON we expected — treat as challenge
             if attempt < len(CHALLENGE_RETRY_DELAYS):
                 delay = CHALLENGE_RETRY_DELAYS[attempt]
                 logger.warning("browser_waf_challenge_retry",
                                page=page_number, attempt=attempt + 1, delay=delay)
+                # the goto above already ran the challenge JS; give it time to
+                # set the clearance cookie, then retry the navigation.
                 await asyncio.sleep(delay)
-                await self._load_warmup()
         raise WafChallenge(
             f"browser mode: challenge persisted after {attempts} attempts on page {page_number}")
 

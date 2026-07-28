@@ -73,8 +73,11 @@ async def run(args: argparse.Namespace) -> int:
             page1_raw = await fetcher.fetch_page_raw(1)
         except WafChallenge:
             print("✗ رفض جدار حماية اعتماد الطلب رغم المتصفح.")
-            print("  انتظر ~10 دقائق (حتى تُرفع القيود عن عنوانك) وأعد المحاولة.")
-            print("  إن تكرر: جرّب من شبكة/جوال مختلف، أو أرسل هذه الرسالة للمطوّر.")
+            print("  جرّب بالترتيب:")
+            print("   1) أعد التشغيل بنافذة متصفح مرئية (أصعب على الجدار أن يكشفها):")
+            print("        $env:ETIMAD_HEADFUL=1 ;  py -3.12 scripts\\fetch_live.py")
+            print("   2) انتظر ~10 دقائق حتى تُرفع القيود عن عنوانك، أو جرّب من بيانات الجوال.")
+            print("   3) إن تكرر، أرسل هذه الرسالة للمطوّر.")
             return 1
         except (httpx.HTTPError, ValueError) as exc:
             print(f"✗ فشل الاتصال بمنصة اعتماد: {exc}")
