@@ -22,6 +22,12 @@ import os
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 10):  # the codebase uses 3.10+ syntax (X | None)
+    sys.stderr.write(
+        f"This script needs Python 3.10+ (you are on {sys.version.split()[0]}).\n"
+        "يتطلب السكربت Python 3.10 أو أحدث — ثبّت 3.12 من python.org ثم شغّله بـ:  py -3.12 scripts/fetch_live.py\n")
+    raise SystemExit(1)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 if hasattr(sys.stdout, "reconfigure"):  # Arabic output on Windows consoles
     sys.stdout.reconfigure(encoding="utf-8")
