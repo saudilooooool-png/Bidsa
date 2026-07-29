@@ -1,0 +1,46 @@
+name: Track Kashaf upstream data
+
+# Watches the upstream Kashaf pipeline (badroneai/etimad-plus-viewer) by polling
+# its data/manifest.json. Records every new snapshot to db/reports/kashaf_tracker.jsonl
+# and refreshes db/reports/kashaf_tracker.md (latest state + observed cadence), so we
+# learn their update frequency and can compare their coverage to our live fetch.
+#
+# Pure stdlib — no pip installs. Commits only when something actually changed.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # every 6 hours (their bot publishes every ~4-8h)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: track-kashaf
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Poll upstream manifest and update the tracker
+        run: python backend/scripts/track_kashaf.py --out-dir db/reports
+
+      - name: Commit any changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain db/reports/kashaf_tracker.jsonl db/reports/kashaf_tracker.md)" ]; then
+            git add db/reports/kashaf_tracker.jsonl db/reports/kashaf_tracker.md
+            git commit -m "track: kashaf upstream snapshot poll [skip ci]"
+            git push
+          else
+            echo "No upstream change — nothing to commit."
+          fi
