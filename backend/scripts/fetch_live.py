@@ -12,6 +12,15 @@ Quick start (from the backend/ directory):
     python scripts/fetch_live.py --dry-run     # fetch 1 page, print, no DB writes
     python scripts/fetch_live.py               # incremental fetch + ingest
     python scripts/fetch_live.py --full        # walk all pages (first backfill)
+
+Authenticated session (survives F5 far better — capture once, reuse many):
+    # 1) log in once in a real browser; we save the cookie jar locally
+    python scripts/fetch_live.py --login
+    # 2) fetch by REUSING those cookies + a keep-alive ping (no browser relaunch)
+    python scripts/fetch_live.py --session
+    python scripts/fetch_live.py --session --full
+Run both from the SAME machine/IP: F5 binds clearance to the IP that logged in.
+Credentials (optional prefill) come from ETIMAD_USERNAME / ETIMAD_PASSWORD env.
 """
 from __future__ import annotations
 
@@ -49,9 +58,21 @@ async def run(args: argparse.Namespace) -> int:
     # challenges everything else, so we use a SINGLE browser session for both
     # the field-check and the real fetch — no separate HTTP probe (its requests
     # would burn the IP's clearance and leave the browser facing a hard block).
-    if args.http:
+    if args.session:
+        from app.services.etimad_session import CookieStore, SessionApiClient
+        store = CookieStore()
+        age = store.age_seconds()
+        if not store.cookie_pairs():
+            print("✗ لا توجد كوكيز محفوظة. سجّل الدخول أولًا:  py -3.12 scripts\\fetch_live.py --login")
+            return 1
+        auth = "مصادَق" if store.looks_authenticated() else "زائر فقط"
+        age_txt = f"{int(age)//60} دقيقة" if age else "غير معروف"
+        print(f"→ إعادة استخدام الجلسة المحفوظة ({auth}، عمرها {age_txt}) مع إبقاء‑حياة تلقائي ...")
+        fetcher: object = SessionApiClient(store)
+        await fetcher.__aenter__()
+    elif args.http:
         print("→ وضع HTTP (تجريبي — يصمد لصفحة واحدة فقط عادةً) ...")
-        fetcher: object = EtimadApiClient()
+        fetcher = EtimadApiClient()
         await fetcher.__aenter__()
     else:
         print("→ فتح المتصفح الخفي والاتصال بمنصة اعتماد ...")
@@ -72,6 +93,10 @@ async def run(args: argparse.Namespace) -> int:
         try:
             page1_raw = await fetcher.fetch_page_raw(1)
         except WafChallenge:
+            if args.session:
+                print("✗ رُفضت الكوكيز المحفوظة (انتهت صلاحيتها أو الجلب من IP مختلف عن التقاطها).")
+                print("  أعد تسجيل الدخول على نفس الجهاز:  py -3.12 scripts\\fetch_live.py --login")
+                return 1
             print("✗ رفض جدار حماية اعتماد الطلب رغم المتصفح.")
             print("  جرّب بالترتيب:")
             print("   1) أعد التشغيل بنافذة متصفح مرئية (أصعب على الجدار أن يكشفها):")
@@ -132,6 +157,29 @@ async def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_login(args: argparse.Namespace) -> int:
+    """One-time browser sign-in that captures the reusable session cookies."""
+    from app.services.etimad_session import CookieStore, login_and_capture
+
+    print("→ فتح المتصفح لتسجيل الدخول إلى اعتماد ...")
+    print("  أكمل الدخول (واعتماد نفاذ على جوالك إن طُلب). سنلتقط الكوكيز تلقائيًا فور نجاح الدخول.")
+    try:
+        result = asyncio.run(login_and_capture(
+            CookieStore(), headful=not args.headless_login))
+    except RuntimeError as exc:
+        print(f"✗ {exc}")
+        print("    py -3.12 -m pip install playwright")
+        print("    py -3.12 -m playwright install chromium")
+        return 1
+    if result["authenticated"]:
+        print(f"✓ تم التقاط جلسة مصادَقة ({result['cookies']} كوكيز) وحفظها في {result['path']}")
+    else:
+        print(f"⚠ حُفظت {result['cookies']} كوكيز في {result['path']} لكن لم نتحقق من كوكي المصادقة.")
+        print("  قد تعمل كزائر. إن فشل الجلب، أعد --login وتأكد من اكتمال تسجيل الدخول.")
+    print("الآن شغّل الجلب:  py -3.12 scripts\\fetch_live.py --session")
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -142,8 +190,17 @@ def main() -> None:
                     help="walk every page instead of stopping at the first known one")
     ap.add_argument("--http", action="store_true",
                     help="use the plain HTTP client instead of the browser (rarely works past page 1)")
+    ap.add_argument("--login", action="store_true",
+                    help="open a browser, sign in once, and save the session cookies locally")
+    ap.add_argument("--session", action="store_true",
+                    help="fetch by reusing the saved cookies + keep-alive (survives F5 best)")
+    ap.add_argument("--headless-login", action="store_true",
+                    help="run --login without a visible window (not recommended)")
     ap.add_argument("--max-pages", type=int, default=100)
     args = ap.parse_args()
+
+    if args.login:
+        raise SystemExit(_run_login(args))
 
     if args.db:
         os.environ["DATABASE_URL"] = args.db

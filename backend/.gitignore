@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 .env
+# Captured Etimad session (contains live auth + F5 cookies — never commit)
+etimad_cookies.json
+cookies*.json

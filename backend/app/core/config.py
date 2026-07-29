@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     ETIMAD_MAX_PAGES: int = 200              # safety ceiling per run
     ETIMAD_PAGE_DELAY_SECONDS: float = 3.0   # pacing between pages (WAF-friendly)
 
+    # --- Etimad authenticated session (captured locally; see scripts/README) ---
+    # A real browser logs in ONCE, passes the F5 challenge, and we persist the
+    # resulting cookie jar (incl. F5 TSPD + auth cookies). A plain HTTP client
+    # then reuses those cookies and a keep-alive ping keeps the session warm —
+    # the only pattern that reliably survives F5. Must run from the same IP that
+    # captured the cookies (F5 binds clearance to IP), i.e. your machine / a KSA VPS.
+    ETIMAD_LOGIN_URL: str = "https://tenders.etimad.sa/"
+    # Authenticated supplier endpoint (richer than the visitor one) once logged in.
+    ETIMAD_SUPPLIER_LIST_PATH: str = "/Tender/AllSupplierTendersAsync"
+    ETIMAD_KEEPALIVE_PATH: str = "/Tender/AllTendersForVisitors"
+    ETIMAD_KEEPALIVE_SECONDS: int = 60       # ping cadence that keeps F5 clearance alive
+    ETIMAD_COOKIE_FILE: str = "etimad_cookies.json"   # persisted cookie jar (gitignored)
+    # Credentials are read from the environment / local .env ONLY — never committed.
+    ETIMAD_USERNAME: str = ""
+    ETIMAD_PASSWORD: str = ""
+
     # --- AI / matching ---
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
