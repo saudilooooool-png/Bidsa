@@ -16,9 +16,10 @@ export default async function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Hero figure — the one number this dashboard leads with */}
-      <section className="rounded-lg border bg-surface p-6">
+      <section className="relative overflow-hidden rounded-xl border bg-surface p-6 shadow-card">
+        <div className="pointer-events-none absolute inset-y-0 start-0 w-1 bg-accent" />
         <div className="text-sm text-ink-2">إجمالي قيمة الترسيات في المستودع</div>
-        <div className="mt-1 text-5xl font-semibold text-ink">
+        <div className="tnum mt-1 text-5xl font-semibold tracking-tight text-ink">
           {sarCompact(overview.total_award_sar)}{" "}
           <span className="text-2xl font-normal text-ink-2">ريال</span>
         </div>

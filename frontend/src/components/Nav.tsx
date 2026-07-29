@@ -2,6 +2,8 @@ import Link from "next/link";
 import { IS_DEMO } from "@/lib/api";
 import { currentUser } from "@/lib/session";
 import { num } from "@/lib/format";
+import NavLink from "@/components/NavLink";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const intelItems = [
   { href: "/", label: "الرئيسية" },
@@ -23,31 +25,28 @@ const workspaceItems = [
 export default async function Nav() {
   const me = IS_DEMO ? null : await currentUser();
   return (
-    <header className="border-b bg-surface">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+    <header className="sticky top-0 z-20 border-b bg-surface/90 backdrop-blur supports-[backdrop-filter]:bg-surface/75">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
         <Link href="/" className="text-lg font-bold text-ink">
           بيدسا <span className="font-normal text-ink-2">| استخبارات المشتريات</span>
         </Link>
         {IS_DEMO ? (
-          <span className="rounded-full border px-2 py-0.5 text-xs text-ink-2">
+          <span className="rounded-full border border-accent/40 bg-accent-soft/50 px-2 py-0.5 text-xs text-ink-2">
             نسخة تجريبية — لقطة تاريخية
           </span>
         ) : null}
-        <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <nav className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm">
           {intelItems.map((it) => (
-            <Link key={it.href} href={it.href} className="text-ink-2 hover:text-ink">
-              {it.label}
-            </Link>
+            <NavLink key={it.href} href={it.href} label={it.label} />
           ))}
           {me
             ? workspaceItems.map((it) => (
-                <Link key={it.href} href={it.href} className="font-medium text-ink hover:underline">
-                  {it.label}
-                </Link>
+                <NavLink key={it.href} href={it.href} label={it.label} strong />
               ))
             : null}
         </nav>
         <div className="ms-auto flex items-center gap-3 text-sm">
+          <ThemeToggle />
           {me ? (
             <span className="text-xs text-ink-2">
               {me.company}

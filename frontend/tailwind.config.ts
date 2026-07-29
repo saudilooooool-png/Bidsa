@@ -25,6 +25,13 @@ const config: Config = {
       borderColor: {
         DEFAULT: "var(--hairline)",
       },
+      boxShadow: {
+        card: "var(--shadow-sm)",
+        "card-lg": "var(--shadow-md)",
+      },
+      ringColor: {
+        accent: "var(--series-1)",
+      },
     },
   },
   plugins: [],
