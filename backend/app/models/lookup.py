@@ -1,7 +1,7 @@
 """Public reference/lookup tables (shared across tenants)."""
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -48,4 +48,8 @@ class Company(Base):
     name_en: Mapped[str | None] = mapped_column(Text)
     # normalized dedupe key (hamza/teh-marbuta variants collapse to one row)
     name_key: Mapped[str | None] = mapped_column(Text, unique=True)
+    # Nationality enrichment (absent from the historical corpus; filled from an
+    # external/authoritative source — see services/company_nationality.py).
+    nationality: Mapped[str | None] = mapped_column(Text)       # ISO-ish country label, e.g. "SA", "TR", "US"
+    is_local: Mapped[bool | None] = mapped_column(Boolean)      # True=Saudi, False=foreign, NULL=unknown
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
