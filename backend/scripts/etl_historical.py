@@ -376,12 +376,66 @@ def load(engine, records_by_shard: list[tuple[str, list[dict]]], snapshot_id: st
 
 
 # --------------------------------------------------------------------------- #
+def _db_size_mb(conn) -> float:
+    return float(conn.execute(
+        text("SELECT pg_database_size(current_database())/1024.0/1024.0")).scalar())
+
+
+def prune_to_retention(engine, keep_newest: int) -> None:
+    """Bound the warehouse to the newest ``keep_newest`` tenders on a capped tier.
+
+    Deletes the oldest tenders (by deadline, then submission) beyond the ceiling;
+    FK cascades drop their awards/winners/bids. A plain VACUUM then marks the
+    freed pages reusable so the subsequent insert fits without extending files
+    past the size cap (Neon free 512 MB). Runs in AUTOCOMMIT because VACUUM
+    cannot run inside a transaction block.
+    """
+    with engine.connect() as raw:
+        conn = raw.execution_options(isolation_level="AUTOCOMMIT")
+        before, total = _db_size_mb(conn), conn.execute(text("SELECT count(*) FROM tenders")).scalar()
+        if total <= keep_newest:
+            print(f"retention: {total:,} tenders <= ceiling {keep_newest:,}; nothing to prune "
+                  f"(db {before:.0f} MB)")
+        else:
+            res = conn.execute(text(
+                "DELETE FROM tenders WHERE id IN ("
+                "  SELECT id FROM tenders"
+                "  ORDER BY deadline DESC NULLS LAST, submitted_at DESC NULLS LAST, id DESC"
+                "  OFFSET :keep)"), {"keep": keep_newest})
+            print(f"retention: deleted {res.rowcount:,} oldest tenders (kept newest {keep_newest:,})")
+        conn.execute(text("VACUUM ANALYZE"))
+        print(f"retention: db size {before:.0f} MB -> {_db_size_mb(conn):.0f} MB after VACUUM")
+
+
+def filter_new(engine, records_by_shard):
+    """Keep only records whose reference_number is not already in the DB.
+
+    Insert-only avoids the ON CONFLICT re-write + bid-ledger rebuild churn that
+    doubles transient space and trips the size cap. Enrichment of existing rows
+    is skipped by design when running against a capped tier."""
+    with engine.connect() as conn:
+        existing = set(conn.execute(select(Tender.reference_number)).scalars().all())
+    out, total, kept = [], 0, 0
+    for shard, recs in records_by_shard:
+        keep = [r for r in recs if str(r.get("ref") or "").strip()
+                and str(r["ref"]).strip() not in existing]
+        total += len(recs); kept += len(keep)
+        if keep:
+            out.append((shard, keep))
+    print(f"only-new: {kept:,} new of {total:,} records ({len(existing):,} already in db)")
+    return out, kept
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--data-dir", type=Path, required=True, help="etimad-plus-viewer/data directory")
     ap.add_argument("--db", default=None, help="sync SQLAlchemy URL (default: settings.DATABASE_URL_SYNC)")
     ap.add_argument("--report-only", action="store_true", help="produce the coverage report, skip DB load")
     ap.add_argument("--report-out", type=Path, default=None, help="write the markdown report here")
+    ap.add_argument("--retention-max", type=int, default=None,
+                    help="keep only the newest N tenders; prune older ones first (capped-tier mode)")
+    ap.add_argument("--only-new", action="store_true",
+                    help="insert only reference_numbers absent from the DB (no re-write churn)")
     args = ap.parse_args()
 
     manifest = args.data_dir / "manifest.json"
@@ -414,6 +468,21 @@ def main() -> None:
                    if not conn.execute(text("SELECT to_regclass(:t)"), {"t": t}).scalar()]
     if missing:
         raise SystemExit(f"missing tables {missing}; run `alembic upgrade head` first")
+
+    # Capped-tier mode: prune oldest to the ceiling (frees space), then load only
+    # genuinely-new records so the write is tiny and never trips the size cap.
+    # Identify genuinely-new records FIRST (before any prune), so pruned-old rows
+    # are never mistaken for new and re-inserted.
+    new_count = 0
+    if args.only_new or args.retention_max:
+        records_by_shard, new_count = filter_new(engine, records_by_shard)
+    # Then delete the oldest, proportional to what we're about to add, so the
+    # total stays at the retention ceiling ("delete old, add new").
+    if args.retention_max:
+        prune_to_retention(engine, max(1000, args.retention_max - new_count))
+    if (args.only_new or args.retention_max) and not records_by_shard:
+        print("no new records to load — database already current.")
+        return
 
     print("loading into database ...")
     stats = load(engine, records_by_shard, snapshot_id)

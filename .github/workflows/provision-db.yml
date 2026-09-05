@@ -30,6 +30,10 @@ jobs:
       # This repository is PUBLIC — the connection string must only ever live
       # in the DATABASE_URL_SYNC repository secret, never in this file.
       DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+      # Retention ceiling for the capped free tier: keep the newest N tenders.
+      # Set the RETENTION_MAX_TENDERS repository variable to override (or upgrade
+      # Neon and raise/remove it to keep the full history).
+      RETENTION_MAX_TENDERS: ${{ vars.RETENTION_MAX_TENDERS || '50000' }}
     steps:
       - name: Require DATABASE_URL_SYNC secret
         run: |
@@ -76,31 +80,20 @@ jobs:
             echo "Skipping ETL: no data/ETL-script changes in this push."
           fi
 
-      # Idempotent re-loads rewrite every row via ON CONFLICT, leaving dead
-      # tuples that bloat the DB and can trip a capped tier's size limit
-      # (Neon free 512 MB -> DiskFull). A plain VACUUM (not FULL) reclaims that
-      # space for REUSE without needing free headroom, so the reload fits.
-      - name: Reclaim dead-tuple space (VACUUM) before reload
-        if: steps.etl_gate.outputs.run == 'true'
-        run: |
-          python - <<'PY'
-          import os, psycopg2
-          dsn = os.environ["DATABASE_URL_SYNC"].replace("+psycopg2", "")
-          conn = psycopg2.connect(dsn)
-          conn.autocommit = True  # VACUUM cannot run inside a transaction block
-          with conn.cursor() as cur:
-              cur.execute("VACUUM ANALYZE;")
-          conn.close()
-          print("VACUUM ANALYZE done")
-          PY
-
-      - name: Load historical warehouse (idempotent)
+      # Capped-tier load (Neon free 512 MB). Full idempotent re-loads rewrite all
+      # 55K rows + rebuild every bid ledger, doubling transient space -> DiskFull.
+      # Instead: prune oldest beyond the retention ceiling (frees + VACUUMs space),
+      # then insert ONLY new reference_numbers (a tiny, churn-free write that fits).
+      # Raise RETENTION_MAX_TENDERS (or upgrade Neon) to keep more history.
+      - name: Load new tenders (prune-old + insert-new, capped-tier safe)
         if: steps.etl_gate.outputs.run == 'true'
         working-directory: backend
         run: |
           python scripts/etl_historical.py \
             --data-dir ../etimad-plus-viewer/data \
             --db "$DATABASE_URL_SYNC" \
+            --retention-max "${RETENTION_MAX_TENDERS:-50000}" \
+            --only-new \
             --report-out ../db/reports/historical_coverage.md
 
       - name: Verify row counts
