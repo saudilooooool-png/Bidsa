@@ -21,16 +21,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Nullable columns with no default are a metadata-only change (no table
+    # rewrite, no extra storage) — safe even on a capped/full tier. We
+    # intentionally do NOT create an index here: a new index allocates new pages
+    # and would extend the cluster past Neon free-tier's 512 MB (DiskFull), and
+    # at ~22K companies the analysis scans fine without one. Add the index after
+    # the DB has real headroom (upgraded tier, or VACUUM FULL when it fits).
     op.add_column("companies", sa.Column("nationality", sa.Text(), nullable=True))
     op.add_column("companies", sa.Column("is_local", sa.Boolean(), nullable=True))
-    # Partial index: analyses filter on classified rows, most stay NULL until enriched.
-    op.create_index(
-        "ix_companies_is_local", "companies", ["is_local"],
-        postgresql_where=sa.text("is_local IS NOT NULL"),
-    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_companies_is_local", table_name="companies")
     op.drop_column("companies", "is_local")
     op.drop_column("companies", "nationality")
