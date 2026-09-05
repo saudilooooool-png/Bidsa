@@ -19,6 +19,7 @@ on:
       - "db/schema.sql"
       - "backend/alembic/**"
       - "backend/scripts/etl_historical.py"
+      - "etimad-plus-viewer/data/**"
       - ".github/workflows/provision-db.yml"
 
 jobs:
@@ -74,6 +75,24 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping ETL: no data/ETL-script changes in this push."
           fi
+
+      # Idempotent re-loads rewrite every row via ON CONFLICT, leaving dead
+      # tuples that bloat the DB and can trip a capped tier's size limit
+      # (Neon free 512 MB -> DiskFull). A plain VACUUM (not FULL) reclaims that
+      # space for REUSE without needing free headroom, so the reload fits.
+      - name: Reclaim dead-tuple space (VACUUM) before reload
+        if: steps.etl_gate.outputs.run == 'true'
+        run: |
+          python - <<'PY'
+          import os, psycopg2
+          dsn = os.environ["DATABASE_URL_SYNC"].replace("+psycopg2", "")
+          conn = psycopg2.connect(dsn)
+          conn.autocommit = True  # VACUUM cannot run inside a transaction block
+          with conn.cursor() as cur:
+              cur.execute("VACUUM ANALYZE;")
+          conn.close()
+          print("VACUUM ANALYZE done")
+          PY
 
       - name: Load historical warehouse (idempotent)
         if: steps.etl_gate.outputs.run == 'true'
