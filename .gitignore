@@ -1,0 +1,2 @@
+# Local-only analysis reports (kept on disk, intentionally not committed).
+/db/reports/local_vs_foreign_bidders.md
